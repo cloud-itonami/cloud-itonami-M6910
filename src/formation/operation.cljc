@@ -29,14 +29,21 @@
             [formation.phase :as phase]
             [formation.store :as store]))
 
-(defn- commit-fact [request context proposal]
+(defn- commit-fact
+  "The ledger fact for a committed op. `approval` is the resumed
+  human-approval decision when this commit came via :request-approval
+  (nil for an auto-commit, e.g. phase 3's :application/intake) -- without
+  this, the ledger cannot answer 'approved by whom', despite
+  `formation.store`'s own docstring promising exactly that query."
+  [request context proposal approval]
   {:t          :committed
    :op         (:op request)
    :actor      (:actor-id context)
    :subject    (:subject request)
    :disposition :commit
    :basis      (:cites proposal)
-   :summary    (:summary proposal)})
+   :summary    (:summary proposal)
+   :approved-by (:by approval)})
 
 (defn- commit-record [request _context proposal]
   {:effect  (:effect proposal)
@@ -123,9 +130,9 @@
 
       ;; Commit -- the ONLY node that writes the SSoT + audit ledger.
       (g/add-node :commit
-        (fn [{:keys [request context proposal record]}]
+        (fn [{:keys [request context proposal record approval]}]
           (store/commit-record! store record)
-          (let [f (commit-fact request context proposal)]
+          (let [f (commit-fact request context proposal approval)]
             (store/append-ledger! store f)
             {:audit [f]})))
 

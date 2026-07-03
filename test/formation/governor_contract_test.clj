@@ -370,6 +370,31 @@
       (is (= 2 (count (store/ledger db)))
           "one commit + one hold, both recorded"))))
 
+(deftest auto-committed-ledger-fact-has-no-fabricated-approver
+  (testing "formation.store's own docstring promises the ledger can answer 'approved by whom' -- an
+            AUTO-commit (phase 3's :application/intake, no human ever in the loop) must not invent one"
+    (let [[db actor] (fresh)]
+      (exec-op actor "t16" {:op :application/intake :subject "app-1"
+                            :patch {:id "app-1" :status :ready}} operator)
+      (is (nil? (:approved-by (last (store/ledger db))))))))
+
+(deftest committed-ledger-fact-records-the-actual-approver
+  (testing "a human-approved filing's ledger fact records WHO approved it, not just that someone did --
+            previously the approver's identity was computed in :request-approval and then silently
+            dropped (merged into an unread :payload key), so the ledger could never actually answer
+            this despite formation.store's docstring claiming it could"
+    (let [[db actor] (fresh)]
+      (exec-op actor "t17a" {:op :jurisdiction/assess :subject "app-1"} operator)
+      (approve! actor "t17a")
+      (exec-op actor "t17b" {:op :kyc/screen :subject "o-1"} operator)
+      (approve! actor "t17b")
+      (exec-op actor "t17" {:op :filing/submit :subject "app-1"} operator)
+      (let [r2 (g/run* actor {:approval {:status :approved :by "supervisor-9"}}
+                       {:thread-id "t17" :resume? true})]
+        (is (= :commit (get-in r2 [:state :disposition])))
+        (is (= "supervisor-9" (:approved-by (last (store/ledger db))))
+            "the approver, not the original requester's actor-id")))))
+
 ;; ----------------------------- cross-backend parity -----------------------------
 ;; The full actor flow -- not just raw store CRUD -- proven identical on
 ;; DatomicStore. These specifically re-run the highest-stakes invariants
