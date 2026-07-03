@@ -241,6 +241,32 @@ lint clean。
 登記後の法域drift を再現し、amend/dissolve 双方が `:no-spec-basis` で
 hold することを検証）。42 tests / 220 assertions 全体 green、lint clean。
 
+## Addendum 7 (2026-07-03) -- KYC未実施のまま filing が通る抜け穴を修正
+
+発見: `sanctions-violations` は officer の KYC verdict が `:hit` かどうか
+だけを見ていた。**一度もスクリーニングされていない officer**（`kyc-of`
+が `nil` を返す）は `(= :hit nil)` が false になるため、**KYCを一度も
+実施していない状態の filing が governor を素通りしていた** -- README の
+"Core Contract" 図が示唆する「screen してから filing」という運用が、
+実際には強制されていなかった。
+
+修正: `formation.governor/kyc-completeness-violations`（新規、HARD）を
+追加。`:filing/submit` 時点で申請の**全 officer**が `:verdict :clear` を
+持っているかを検証し（`:incomplete` や未実施(`nil`)は `:clear` と区別
+される）、満たさなければ `:kyc-incomplete` で un-overridable hold。
+
+テスト用に `formation.store/demo-data` へ officer `o-3`（sanctions-hit?
+false, id-doc nil）を追加 -- どの application にもデフォルトでは
+アタッチされない「予備」officer で、`:sanctions-hit` を誤って同時に
+トリガーせずに `:incomplete` verdict を再現するために使う（既存の o-2
+は sanctions-hit? true のため、スクリーニングすると必ず `:hit` になり
+`:incomplete` を再現できない）。
+
+4 tests / 6 assertions を追加（KYC未実施→hold、`:incomplete` verdict
+（o-3、id-doc欠落）→hold、既存の filing 成功系テストは o-1 を screen
+済みのため無変更で green）。44 tests / 226 assertions 全体 green、
+lint clean。
+
 ## 代替案と不採用理由
 
 | 案 | 採否 | 理由 |

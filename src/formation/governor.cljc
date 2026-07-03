@@ -6,7 +6,7 @@
   proposal and fall back to HOLD -- the company-formation analog of
   robotaxi's Minimal Risk Condition and gftd-talent-actor's PolicyGovernor.
 
-  Seven checks, in priority order. The first five are HARD violations: a
+  Eight checks, in priority order. The first six are HARD violations: a
   human approver CANNOT override them (you don't get to approve your way
   past a sanctions hit or a fabricated legal requirement). The last two are
   SOFT: they ask a human to look (low confidence / actuation), and the
@@ -19,17 +19,22 @@
                              source (`formation.facts`), or invent one?
     2. Sanctions hold     -- does any officer on the application carry a
                              sanctions/PEP hit (screened or on file)?
-    3. Document complete  -- for a filing proposal, are the jurisdiction's
+    3. KYC complete       -- for a filing proposal, has EVERY officer
+                             actually been screened and cleared? A never-
+                             screened officer is not a hit (nil != :hit),
+                             so `sanctions-hit` alone would let a filing
+                             through with zero screening ever performed.
+    4. Document complete  -- for a filing proposal, are the jurisdiction's
                              required docs actually satisfied?
-    4. Amendment target   -- for an amendment proposal, is there an
+    5. Amendment target   -- for an amendment proposal, is there an
                              existing registry number to amend, and is the
                              amendment actually non-empty?
-    5. Dissolution target -- for a dissolution proposal, is there an
+    6. Dissolution target -- for a dissolution proposal, is there an
                              existing registry number to dissolve, and is
                              the entity not ALREADY dissolved (no double
                              dissolution)?
-    6. Confidence floor   -- LLM confidence below threshold -> escalate.
-    7. Actuation gate     -- :stake :actuation -> always escalate; never
+    7. Confidence floor   -- LLM confidence below threshold -> escalate.
+    8. Actuation gate     -- :stake :actuation -> always escalate; never
                              auto, at any phase (structural, not a policy
                              toggle)."
   (:require [formation.facts :as facts]
@@ -71,6 +76,20 @@
     (when (or hit-in-proposal? hit-on-file?)
       [{:rule :sanctions-hit
         :detail "制裁/PEPリスト一致のある関係者を含む申請は進められない"}])))
+
+(defn- kyc-completeness-violations
+  "For `:filing/submit`, EVERY officer on the application must have been
+  KYC-screened AND cleared (`:verdict :clear`) -- HARD, un-overridable.
+  `sanctions-violations` alone is not enough: an officer who was simply
+  never screened has a nil verdict, and nil is not :hit, so a filing with
+  zero screening ever performed would otherwise sail through clean."
+  [{:keys [op subject]} st]
+  (when (= op :filing/submit)
+    (let [officer-ids (:officers (store/application st subject))
+          cleared? (fn [oid] (= :clear (:verdict (store/kyc-of st oid))))]
+      (when-not (every? cleared? officer-ids)
+        [{:rule :kyc-incomplete
+          :detail "全officerのKYCスクリーニング(:clear)が完了していない状態での提出提案"}]))))
 
 (defn- document-violations
   "For `:filing/submit`, the jurisdiction's required docs must actually be
@@ -129,6 +148,7 @@
   (let [hard (into []
                    (concat (spec-basis-violations request proposal)
                            (sanctions-violations request proposal st)
+                           (kyc-completeness-violations request st)
                            (document-violations request st)
                            (amendment-violations request proposal st)
                            (dissolution-violations request st)))

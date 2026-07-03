@@ -20,6 +20,9 @@
 (defn- exec-op [actor tid request context]
   (g/run* actor {:request request :context context} {:thread-id tid}))
 
+(defn- approve! [actor tid]
+  (g/run* actor {:approval {:status :approved :by "op-1"}} {:thread-id tid :resume? true}))
+
 (deftest clean-intake-auto-commits
   (let [[db actor] (fresh)
         res (exec-op actor "t1"
@@ -64,6 +67,32 @@
       (is (= :hold (get-in res [:state :disposition])))
       (is (some #{:incomplete-documents} (-> (store/ledger db) first :basis))))))
 
+(deftest filing-without-any-kyc-screening-is-held
+  (testing "assessment is clean, but NO officer was ever screened -> HOLD (kyc-incomplete), not a silent pass"
+    (let [[db actor] (fresh)
+          _ (exec-op actor "t5b-a" {:op :jurisdiction/assess :subject "app-1"} operator)
+          _ (approve! actor "t5b-a")
+          res (exec-op actor "t5b" {:op :filing/submit :subject "app-1"} operator)]
+      (is (= :hold (get-in res [:state :disposition])))
+      (is (some #{:kyc-incomplete} (-> (store/ledger db) last :basis)))
+      (is (nil? (:registry-number (store/application db "app-1"))) "nothing filed"))))
+
+(deftest filing-with-an-incomplete-kyc-verdict-is-held
+  (testing "an officer screened but only to :incomplete (missing id-doc) is not the same as :clear -> HOLD"
+    (let [[db actor] (fresh)]
+      ;; o-3 has no :id-doc and no sanctions hit in the demo data, so
+      ;; screening it yields :incomplete (not :hit, not :clear).
+      (store/commit-record! db {:effect :application/upsert
+                                :value {:id "app-1" :officers ["o-3"]}})
+      (exec-op actor "t5c-a" {:op :jurisdiction/assess :subject "app-1"} operator)
+      (approve! actor "t5c-a")
+      (exec-op actor "t5c-b" {:op :kyc/screen :subject "o-3"} operator)
+      (approve! actor "t5c-b")
+      (is (= :incomplete (:verdict (store/kyc-of db "o-3"))) "sanity: screening yielded :incomplete, not :clear")
+      (let [res (exec-op actor "t5c" {:op :filing/submit :subject "app-1"} operator)]
+        (is (= :hold (get-in res [:state :disposition])))
+        (is (some #{:kyc-incomplete} (-> (store/ledger db) last :basis)))))))
+
 (deftest filing-submit-always-escalates-then-human-decides
   (testing "a clean, fully-assessed filing still ALWAYS interrupts for human approval -- actuation is never auto"
     (let [[db actor] (fresh)
@@ -88,9 +117,6 @@
                      {:thread-id "t7" :resume? true})]
       (is (= :hold (get-in r2 [:state :disposition])))
       (is (empty? (store/registry-history db)) "nothing drafted on reject"))))
-
-(defn- approve! [actor tid]
-  (g/run* actor {:approval {:status :approved :by "op-1"}} {:thread-id tid :resume? true}))
 
 (defn- file-app-1!
   "Drive app-1 all the way to :filed (assess -> approve, screen -> approve,

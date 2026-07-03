@@ -54,7 +54,11 @@
              :address "unknown" :status :intake}}
    :officers
    {"o-1" {:id "o-1" :name "田中 一郎" :sanctions-hit? false :id-doc "passport-jp-****1234"}
-    "o-2" {:id "o-2" :name "J. Doe" :sanctions-hit? true :id-doc nil}}})
+    "o-2" {:id "o-2" :name "J. Doe" :sanctions-hit? true :id-doc nil}
+    ;; not on any application by default -- a spare officer for tests that
+    ;; need a :sanctions-hit? false / :id-doc nil officer (screens to
+    ;; :incomplete, never :clear, without also tripping :sanctions-hit).
+    "o-3" {:id "o-3" :name "鈴木 花子" :sanctions-hit? false :id-doc nil}}})
 
 ;; ----------------------------- shared filing logic -----------------------------
 

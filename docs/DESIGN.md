@@ -43,7 +43,7 @@ formation.operation/build          (OperationActor: langgraph-clj StateGraph)
 
 ## 4. RegistrarGovernor（独立検閲層）
 
-7チェック、優先順位順。最初の5つは HARD（人間が承認で上書き不可）:
+8チェック、優先順位順。最初の6つは HARD（人間が承認で上書き不可）:
 
 1. **spec-basis** -- `:jurisdiction/assess` / `:filing/submit` /
    `:registry/amend` / `:registry/dissolve` の提案が `formation.facts` の
@@ -54,19 +54,24 @@ formation.operation/build          (OperationActor: langgraph-clj StateGraph)
 2. **sanctions-hit** -- 申請に関わる officer が制裁/PEPリストに一致して
    いないか（このリクエストで判明した場合・既に store に記録済みの場合の
    両方をチェック）。一致すれば un-overridable hold。
-3. **document-complete** -- `:filing/submit` の時点で、法域の必要書類が
+3. **kyc-complete** -- `:filing/submit` の時点で、申請に関わる**全 officer**
+   が実際に KYC スクリーニング済み(`:verdict :clear`)か。未スクリーニング
+   （`nil`）は `:hit` ではないため `sanctions-hit` チェックだけでは
+   検出できない -- 一度もスクリーニングされていない officer がいる filing
+   がそのまま通ってしまう抜け穴を塞ぐ。
+4. **document-complete** -- `:filing/submit` の時点で、法域の必要書類が
    実際に充足しているか（advisor の自己申告 confidence を信用せず、
    governor 自身が `formation.facts/required-docs-satisfied?` で検証）。
-4. **amendment-target** -- `:registry/amend` の対象申請に registry_number
+5. **amendment-target** -- `:registry/amend` の対象申請に registry_number
    （= 初回登記済み）があるか、かつ変更内容が空でないか。未登記への変更登記
    提案・空の変更提案はどちらも hold。
-5. **dissolution-target** -- `:registry/dissolve` の対象申請に
+6. **dissolution-target** -- `:registry/dissolve` の対象申請に
    registry_number があるか、かつ既に解散済み（二重解散）でないか。
 
 残り2つは SOFT（人間が承認すればよい）:
 
-6. **confidence floor** -- confidence が閾値未満なら escalate。
-7. **actuation gate** -- `:stake :actuation`（実際の政府提出・実際の変更
+7. **confidence floor** -- confidence が閾値未満なら escalate。
+8. **actuation gate** -- `:stake :actuation`（実際の政府提出・実際の変更
    登記提出・実際の解散登記提出・実際の手数料送金）は常に escalate。
    **`formation.phase` のどのフェーズの `:auto` 集合にも `:filing/submit`
    / `:registry/amend` / `:registry/dissolve` を含めない**ことと合わせて、
