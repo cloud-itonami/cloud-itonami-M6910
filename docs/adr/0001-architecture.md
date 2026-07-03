@@ -333,6 +333,33 @@ hold・申請完全不変、無害に見えるパッチでも同様にhold、解
 修正前後の挙動差を確認済み（修正後は smuggled intake が申請を一切
 変更しないことを確認）。
 
+## Addendum 10 (2026-07-03) -- governor 契約の DatomicStore cross-backend 証明
+
+発見: `test/formation/governor_contract_test.clj` の全テスト（~25件、
+Addendum 1-9 で追加した hold ケース含む）は `formation.store/seed-db`
+（MemStore）専用だった。`store_contract_test.clj` は生の CRUD parity
+（application/officer/kyc/assessment/ledger/registry-history の
+読み書き）を保証しているが、それは **advisor→governor→phase→commit
+という actor 全体の flow が両バックエンドで同じ挙動をする**ことまでは
+証明しない -- 特に Addendum 9 で直した重大な post-filing-intake
+バイパス修正は、DatomicStore 経由では一度も演習されていなかった。
+
+修正: `fresh` を `db-ctor` を受け取れるよう一般化
+（`(fresh)` は従来通り MemStore、`(fresh store/datomic-seed-db)` で
+DatomicStore に切替）。既存 ~25 テストは変更なし（後方互換）。新たに
+2つの cross-backend テストを追加:
+
+- `post-filing-intake-blocked-on-datomic-store-too` -- Addendum 9 の
+  重大修正が DatomicStore でも同一に効くことを確認。
+- `full-lifecycle-on-datomic-store-too` -- incorporate → amend →
+  dissolve → 二重解散hold の全ライフサイクルを DatomicStore で通し、
+  registry-history 件数・application status が MemStore 版と同じ
+  遷移をすることを確認。
+
+2 tests / 12 assertions を追加。53 tests / 257 assertions 全体 green、
+lint clean。全テストが一発 green（バックエンド抽象化がリークしていない
+ことの追加証拠）。
+
 ## 代替案と不採用理由
 
 | 案 | 採否 | 理由 |

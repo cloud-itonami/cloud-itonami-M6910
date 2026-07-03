@@ -11,9 +11,19 @@
             [formation.store :as store]
             [formation.operation :as op]))
 
-(defn- fresh []
-  (let [db (store/seed-db)]
-    [db (op/build db)]))
+(defn- fresh
+  "A fresh [db actor] pair. Defaults to MemStore; pass `store/datomic-
+  seed-db` to run the SAME actor flow against DatomicStore instead --
+  every other test in this namespace exercises the governor contract
+  through MemStore only. `store_contract_test.clj` proves raw CRUD parity
+  between the two backends, but that alone does not prove the FULL actor
+  flow (advisor -> governor -> phase -> commit, including every hold
+  path) behaves identically -- see the `*-on-datomic-store-too` tests
+  below for that cross-backend proof on the highest-stakes invariants."
+  ([] (fresh store/seed-db))
+  ([db-ctor]
+   (let [db (db-ctor)]
+     [db (op/build db)])))
 
 (def operator {:actor-id "op-1" :actor-role :registrar :phase 3})
 
@@ -359,3 +369,47 @@
       (exec-op actor "b" {:op :jurisdiction/assess :subject "app-1" :no-spec? true} operator)
       (is (= 2 (count (store/ledger db)))
           "one commit + one hold, both recorded"))))
+
+;; ----------------------------- cross-backend parity -----------------------------
+;; The full actor flow -- not just raw store CRUD -- proven identical on
+;; DatomicStore. These specifically re-run the highest-stakes invariants
+;; from above (the critical post-filing-intake bypass fix, and the full
+;; incorporate -> amend -> dissolve lifecycle) against `datomic-seed-db`.
+
+(deftest post-filing-intake-blocked-on-datomic-store-too
+  (testing "the critical actuation-gate-bypass fix holds on DatomicStore, not just MemStore"
+    (let [[db actor] (fresh store/datomic-seed-db)]
+      (file-app-1! actor)
+      (let [before (store/application db "app-1")
+            res (exec-op actor "d1" {:op :application/intake :subject "app-1"
+                                     :patch {:id "app-1" :capital 1 :address "FAKE"
+                                            :officers ["o-1" "o-2"]}} operator)]
+        (is (= :hold (get-in res [:state :disposition])))
+        (is (some #{:post-filing-intake-blocked} (-> (store/ledger db) last :basis)))
+        (is (= before (store/application db "app-1")) "application completely unchanged")))))
+
+(deftest full-lifecycle-on-datomic-store-too
+  (testing "incorporate -> amend -> dissolve, and the double-dissolution hold, all behave identically on DatomicStore"
+    (let [[db actor] (fresh store/datomic-seed-db)]
+      (file-app-1! actor)
+      (is (= :filed (:status (store/application db "app-1"))))
+      (is (= 1 (count (store/registry-history db))))
+
+      (exec-op actor "d2" {:op :registry/amend :subject "app-1"
+                           :changed-fields {:address "新住所"}
+                           :effective-date "2026-07-03"} operator)
+      (approve! actor "d2")
+      (is (= "新住所" (:address (store/application db "app-1"))))
+      (is (= 2 (count (store/registry-history db))))
+
+      (exec-op actor "d3" {:op :registry/dissolve :subject "app-1"
+                           :reason "voluntary wind-up" :effective-date "2026-08-01"} operator)
+      (approve! actor "d3")
+      (is (= :dissolved (:status (store/application db "app-1"))))
+      (is (= 3 (count (store/registry-history db))))
+
+      (let [res (exec-op actor "d4" {:op :registry/dissolve :subject "app-1"
+                                     :reason "second attempt" :effective-date "2026-09-01"} operator)]
+        (is (= :hold (get-in res [:state :disposition])))
+        (is (some #{:already-dissolved} (-> (store/ledger db) last :basis)))
+        (is (= 3 (count (store/registry-history db))) "no second dissolution appended")))))
