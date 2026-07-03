@@ -3,7 +3,7 @@
   arithmetic ported from `matsurigoto`'s corp-registry module
   (etzhayyim/root, ADR-2606062300); these tests are adapted from that
   module's own conformance suite so the port stays provably equivalent."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [formation.registry :as r]))
 
 (deftest certificate-is-a-draft-not-a-real-filing
@@ -33,6 +33,24 @@
   (is (not (r/validate-lei "TOOSHORT")))
   (is (not (r/validate-lei "OPER00000000000001*9")))
   (is (not (r/validate-lei 12345))))
+
+(deftest default-lei-does-not-collide-across-jurisdictions-at-the-same-sequence
+  (testing "two entirely unrelated companies, each the Nth filing in ITS OWN jurisdiction
+            (formation.store/next-sequence is per-jurisdiction, so this is the common case,
+            not an edge case -- every jurisdiction's very first filing is sequence 0), must
+            never be issued the same LEI just because they share a sequence number and no
+            caller supplied an explicit entity-id12"
+    (let [jpn-first (r/register-incorporation "Kotoba Trading GK" ["o-1"] 1000000 "art" "addr" "JPN" 0)
+          gbr-first (r/register-incorporation "Totally Different Ltd" ["o-9"] 500000 "art2" "addr2" "GBR" 0)]
+      (is (not= (get jpn-first "lei") (get gbr-first "lei")))
+      (is (r/validate-lei (get jpn-first "lei")))
+      (is (r/validate-lei (get gbr-first "lei")))))
+  (testing "holds across a broader sweep of jurisdictions and sequence numbers, not just one pair"
+    (let [combos (for [j ["JPN" "GBR" "DEU" "USA-DE" "EST" "KOR" "FRA" "BRA"]
+                       s (range 5)]
+                   (get (r/register-incorporation "X" ["o"] 1 "a" "ad" j s) "lei"))]
+      (is (= (count combos) (count (distinct combos))) "no two distinct (jurisdiction, sequence) pairs share a LEI")
+      (is (every? r/validate-lei combos)))))
 
 (deftest incorporation-assigns-registry-number-and-lei
   (let [result (r/register-incorporation "Kotoba Trading GK" ["officer:tanaka"] 10000000

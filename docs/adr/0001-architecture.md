@@ -459,6 +459,44 @@ un-overridable hold（escalate すらしない -- 人間の目に触れる前に
 
 57 tests / 267 assertions 全体 green、lint clean。
 
+## Addendum 13 (2026-07-03) -- 異なる法域の会社が同一のLEIを発行され得た（ISO 17442 の根幹である全域一意性違反）
+
+発見（実機再現で確認）: `formation.registry/register-incorporation` は
+呼び出し元が `entity-id12` を明示しない場合、デフォルトで
+`(zero-pad sequence 12)` -- つまり **`formation.store/next-sequence` が
+返す、法域ごとの採番だけ**を entity-id にしていた。`next-sequence` は
+法域ごとに独立したカウンタ（JPN の初回filingもGBRの初回filingも
+`sequence 0`）であり、`jurisdiction` は entity-id の計算に一切
+使われていなかった。結果、**法域が異なる2つの、名前も officer も
+無関係な会社**が、それぞれ「自国での何番目の filing か」がたまたま
+一致するだけで（最も起こりやすいのが両方とも初回 = sequence 0）、
+**テキストとして完全に同一のLEIを発行される**ことを実機で確認した
+（JPN の初回 filing と GBR の初回 filing が両方とも
+`OPER0000000000000088` になった）。LEI (Legal Entity Identifier, ISO
+17442) の存在意義そのものが「法人を全世界で一意に識別する」ことである
+ため、これは registry モジュールの中核となる保証への違反だった。
+
+修正: `formation.registry/default-entity-id12`（新規、private）を追加。
+`jurisdiction` と `sequence` を連結した文字列を `to-digits`（既存の
+LEI用英数字→数値変換）で数値化し、`BigInteger`/`BigInt` の base-36
+表現の**末尾12桁**を entity-id とする（末尾12桁 = `n mod 36^12` という
+位取り記数法の性質そのものであり、近似ではなく厳密な剰余簡約）。
+`register-incorporation` のデフォルトフォールバックを
+`(zero-pad sequence 12)` から `(default-entity-id12 jurisdiction
+sequence)` に置き換えた。`entity-id12` を明示的に渡す既存の呼び出し経路
+（現状は無いが API として残っている）は無変更。registry-number
+自体の採番方式（`JPN-00000000` 等、法域ごとの人間可読な連番）はこの
+修正の対象外で変更していない -- 壊れていたのはLEIのentity-id導出だけ。
+
+2 tests / 5 assertions を追加:
+- 実際にJPN/GBRそれぞれの初回filingを発行し、LEIが異なること・両方とも
+  ISO 7064 で valid であることを確認（実機再現の直接回帰テスト）。
+- 8法域 × sequence 0-4 の40通り全組み合わせで LEI の重複が無いこと、
+  全て ISO 7064 valid であることを確認（単一ペアに限らない広域スイープ）。
+
+58 tests / 272 assertions 全体 green、lint clean。実機再現スクリプトで
+修正前（衝突する）・修正後（衝突しない）の挙動差を確認済み。
+
 ## 代替案と不採用理由
 
 | 案 | 採否 | 理由 |

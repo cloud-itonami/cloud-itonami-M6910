@@ -122,7 +122,12 @@ digit を実装）+ registry-number 採番 + 追記型 amendment/dissolution rec
 モジュールのポートで、スペック数学（LEI/MOD-97-10）はどの principal が
 その法域の代理を行うかに依存しないため共有した。**このモジュールが返すのは
 常にドラフト（`"proof" nil`, `"issued_by_registry" false`）であり、実際の
-政府登記所が発行した証明書ではない。** `register-change`（変更登記）/
+政府登記所が発行した証明書ではない。** LEI の entity-id（12桁）は
+呼び出し元が明示しない限り `jurisdiction` + `sequence`（法域ごとの採番）
+から base-36 演算で導出する -- `sequence` 単体（法域をまたいで再利用される
+値）から導出すると、異なる法域の「その法域で何番目の filing か」が
+たまたま一致しただけで**無関係な2社が同一のLEIを発行される**（詳細は
+Addendum 13）。 `register-change`（変更登記）/
 `register-dissolution`（解散登記）はそれぞれ `formation.store` の
 `:registry/amend-submitted` / `:registry/dissolve-submitted` effect から
 呼ばれ、元の incorporation record を書き換えず registry-history に追記する

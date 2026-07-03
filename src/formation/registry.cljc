@@ -68,6 +68,30 @@
    (let [base (str/upper-case (str lou-prefix "00" entity-id12))]
      (str base (compute-lei-check-digits base)))))
 
+(defn- default-entity-id12
+  "Deterministic 12-char alphanumeric entity id when the caller supplies no
+  explicit `entity-id12` -- derived from BOTH `jurisdiction` and `sequence`
+  via base-36 arithmetic over their combined digit form (same to-digits /
+  arbitrary-precision approach `mod97` uses), never from `sequence` alone.
+  `sequence` (formation.store/next-sequence) is PER-JURISDICTION, so two
+  different jurisdictions' Nth filing share the same `sequence` value --
+  deriving the eid from `sequence` alone would make two entirely unrelated
+  companies in two different jurisdictions receive the textually IDENTICAL
+  LEI the moment both happen to be, say, each jurisdiction's first-ever
+  filing (sequence 0), violating ISO 17442's global-uniqueness guarantee."
+  [jurisdiction sequence]
+  (let [alnum (str/upper-case (str/replace (str jurisdiction sequence) #"[^0-9A-Za-z]" ""))
+        n #?(:clj  (java.math.BigInteger. ^String (to-digits alnum))
+             :cljs (js/BigInt (to-digits alnum)))
+        b36 (str/upper-case #?(:clj  (.toString ^java.math.BigInteger n 36)
+                               :cljs (.toString n 36)))
+        ;; the last 12 base-36 digits of n == n mod 36^12 (place-value fact,
+        ;; same as "last 3 decimal digits" == n mod 1000) -- a deterministic
+        ;; reduction into the 12-char alphanumeric space, not a truncation
+        ;; that discards jurisdiction's contribution.
+        last12 (subs b36 (max 0 (- (count b36) 12)))]
+    (str (apply str (repeat (max 0 (- 12 (count last12))) "0")) last12)))
+
 ;; -- registry records --
 
 (defn- unsigned-certificate
@@ -104,7 +128,7 @@
    (when (< sequence 0)
      (throw (ex-info "incorporation: sequence must be >= 0" {})))
    (let [registry-number (str (str/upper-case jurisdiction) "-" (zero-pad sequence 8))
-         base-eid (or entity-id12 (zero-pad sequence 12))
+         base-eid (or entity-id12 (default-entity-id12 jurisdiction sequence))
          eid (-> base-eid
                  (subs 0 (min 12 (count base-eid)))
                  (#(str (apply str (repeat (max 0 (- 12 (count %))) "0")) %))
