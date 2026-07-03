@@ -89,8 +89,16 @@ formation.operation/build          (OperationActor: langgraph-clj StateGraph)
    `:registry/dissolve`）を使う」であり、「intake を承認する」ではない
    （そもそも intake は escalate すらせず即 hold のため承認経路が無い）。
 7. **amendment-target** -- `:registry/amend` の対象申請に registry_number
-   （= 初回登記済み）があるか、かつ変更内容が空でないか。未登記への変更登記
-   提案・空の変更提案はどちらも hold。
+   （= 初回登記済み）があるか、かつ変更内容が空でないか、かつ
+   **`changed-fields` が `amendable-fields` allowlist（`:entity-name`
+   `:address` `:capital` `:articles` `:officers`）以外のフィールドに触れて
+   いないか**。未登記への変更登記提案・空の変更提案・許可外フィールド
+   （`:status`・`:jurisdiction`・`:registry-number`・`:lei`・`:id`）への
+   変更提案はすべて hold。最後のケースが無いと、無害に見える住所変更に
+   `{:status :dissolved}` を紛れ込ませることで、`:registry/dissolve` 自身の
+   検査（spec-basis、二重解散防止）を一切通さずに解散状態へ書き換えられ、
+   registry-history には単なる change-draft しか残らない -- 監査台帳が
+   実態と食い違う（Addendum 14）。
 8. **dissolution-target** -- `:registry/dissolve` の対象申請に
    registry_number があるか、かつ既に解散済み（二重解散）でないか。
 

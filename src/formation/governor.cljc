@@ -201,21 +201,51 @@
         [{:rule :post-filing-intake-blocked
           :detail "登記/解散済みの申請への intake 経由の変更は禁止。:registry/amend または :registry/dissolve を使うこと"}]))))
 
+(def amendable-fields
+  "The ONLY application fields a `:registry/amend` may touch -- an
+  ALLOWLIST, not a denylist, so a newly-added application field defaults
+  to forbidden until someone deliberately decides it belongs here.
+  Everything else is structurally off-limits to a mere amendment, most
+  importantly `:status` -- lifecycle-managed exclusively by
+  `:filing/submit` / `:registry/dissolve`, each with their own dedicated
+  governor scrutiny (document-complete, dissolution-target/double-
+  dissolution) that a `:registry/amend` proposal never runs. Also
+  forbidden: `:jurisdiction`/`:registry-number`/`:lei` (registry-assigned,
+  never customer-editable via a change filing) and `:id` (identity).
+  `:officers` IS amendable -- it already carries its own KYC/sanctions
+  scrutiny via `officers-at-stake`."
+  #{:entity-name :address :capital :articles :officers})
+
 (defn- amendment-violations
   "For `:registry/amend`, the target application must already carry a
   registry number (you cannot amend a filing that was never submitted),
-  and the amendment must actually change something -- both HARD."
+  the amendment must actually change something, and it must not touch any
+  field outside `amendable-fields` -- all HARD. Without the last check, an
+  amendment proposal could smuggle `{:status :dissolved}` (or `:jurisdiction`,
+  `:registry-number`, `:lei`) into `changed-fields` alongside an innocuous-
+  looking address change: it would commit as a plain 'change-draft' record
+  with NONE of `:registry/dissolve`'s own scrutiny (spec-basis-for-
+  dissolution, double-dissolution guard) ever run, and registry-history
+  would show a misleading address-change record for what was actually a
+  dissolution -- corrupting the very audit trail this actor exists to keep
+  trustworthy (verified via direct exploitation: see ADR Addendum 14)."
   [{:keys [op subject]} proposal st]
   (when (= op :registry/amend)
     (let [app (store/application st subject)
-          changed (get-in proposal [:value :changed-fields])]
+          changed (get-in proposal [:value :changed-fields])
+          forbidden (remove amendable-fields (keys changed))]
       (cond-> []
         (nil? (:registry-number app))
         (conj {:rule :no-registry-number
                :detail "初回登記(registry_number)が無い申請には変更登記できない"})
         (empty? changed)
         (conj {:rule :empty-amendment
-               :detail "変更内容が空の変更登記提案"})))))
+               :detail "変更内容が空の変更登記提案"})
+        (seq forbidden)
+        (conj {:rule :amendment-forbidden-field
+               :detail (str "変更登記で変更できないフィールドが含まれている（"
+                            "status/jurisdiction/registry-number/lei/id は "
+                            ":registry/amend の対象外）: " (vec forbidden))})))))
 
 (defn- dissolution-violations
   "For `:registry/dissolve`, the target must already carry a registry

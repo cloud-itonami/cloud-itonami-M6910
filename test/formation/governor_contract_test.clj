@@ -260,6 +260,39 @@
         (let [r2 (approve! actor "t8f")]
           (is (= :commit (get-in r2 [:state :disposition]))))))))
 
+(deftest amendment-cannot-smuggle-a-status-change-through-changed-fields
+  (testing "an amendment that ALSO flips :status :dissolved alongside an innocuous-looking
+            address change is a HARD violation -- :status is lifecycle-managed exclusively
+            by :filing/submit / :registry/dissolve, each with their own scrutiny that a
+            :registry/amend proposal never runs (see ADR Addendum 14: verified by direct
+            exploitation that, before this fix, this committed as a plain change-draft
+            record with the application left in a bogus :dissolved state and no
+            dissolution-draft ever appended)"
+    (let [[db actor] (fresh)]
+      (file-app-1! actor)
+      (let [res (exec-op actor "t8g" {:op :registry/amend :subject "app-1"
+                                      :changed-fields {:address "新住所" :status :dissolved}
+                                      :effective-date "2026-07-03"} operator)]
+        (is (= :hold (get-in res [:state :disposition])) "settles immediately, no interrupt")
+        (is (not= :interrupted (:status res)))
+        (is (some #{:amendment-forbidden-field} (-> (store/ledger db) last :basis)))
+        (is (= :filed (:status (store/application db "app-1"))) "status untouched, still :filed")
+        (is (= 1 (count (store/registry-history db))) "no change-draft appended")))))
+
+(deftest amendment-cannot-smuggle-a-jurisdiction-or-registry-number-change
+  (testing "jurisdiction/registry-number/lei/id are registry-assigned or identity fields --
+            never customer-editable via a mere amendment, regardless of spec-basis citation"
+    (let [[db actor] (fresh)]
+      (file-app-1! actor)
+      (doseq [forbidden-patch [{:jurisdiction "ATL"} {:registry-number "FAKE-999"}
+                               {:lei "FAKE0000000000000000"} {:id "app-99"}]]
+        (let [res (exec-op actor (str "t8h-" (name (first (keys forbidden-patch))))
+                           {:op :registry/amend :subject "app-1"
+                            :changed-fields forbidden-patch
+                            :effective-date "2026-07-03"} operator)]
+          (is (= :hold (get-in res [:state :disposition])) (str forbidden-patch " must be rejected"))
+          (is (some #{:amendment-forbidden-field} (-> (store/ledger db) last :basis))))))))
+
 (deftest amendment-with-no-changes-is-held
   (testing "an empty changed-fields amendment -> HOLD, even for a filed application"
     (let [[db actor] (fresh)]
