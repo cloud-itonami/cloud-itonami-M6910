@@ -2,13 +2,16 @@
   "The real-inference advisor (langchain.model ChatModel), driven offline by
   langchain's mock-model. Proves: a real LLM proposal is parsed, still
   fully censored by the RegistrarGovernor, and that an unparseable/garbage
-  response -- or one that fabricates a jurisdiction's requirements -- can
-  never auto-file or auto-pay."
+  response -- or one that fabricates a jurisdiction's requirements, or one
+  that answers a harmless-looking request with a mismatched, higher-stakes
+  :effect -- can never auto-file or auto-pay."
   (:require [clojure.test :refer [deftest is testing]]
+            [langgraph.graph :as g]
             [langchain.model :as model]
             [formation.registrarllm :as registrarllm]
             [formation.governor :as governor]
-            [formation.store :as store]))
+            [formation.store :as store]
+            [formation.operation :as op]))
 
 (def operator {:actor-id "op-1" :actor-role :registrar :phase 3})
 (def assess-req {:op :jurisdiction/assess :subject "app-1"})
@@ -57,3 +60,42 @@
       (is (= :noop (:effect p)))
       (is (= 0.0 (:confidence p)))
       (is (not (:ok? (governor/check assess-req operator p (store/seed-db))))))))
+
+(deftest llm-answering-an-assessment-request-with-a-filing-effect-is-rejected
+  (testing "a harmless-looking :jurisdiction/assess request answered with :effect
+            :filing/mark-submitted -- even with plausible cites and high confidence --
+            is a HARD violation, not just a low-confidence escalation"
+    (let [p (advise-with assess-req
+                         (str "{:summary \"JPN 向け必要書類を提案\" :rationale \"法務局の公式ソースに基づく\" "
+                              ":cites [\"商業登記法\" \"https://www.moj.go.jp/MINJI/minji06.html\"] "
+                              ":effect :filing/mark-submitted "
+                              ":value {:application-id \"app-1\"} "
+                              ":stake nil :confidence 0.95}"))
+          v (governor/check assess-req operator p (store/seed-db))]
+      (is (:hard? v))
+      (is (some #{:effect-mismatch} (map :rule (:violations v)))))))
+
+(deftest effect-mismatch-cannot-actually-file-through-the-full-actor-graph
+  (testing "end-to-end reproduction: a :jurisdiction/assess request whose LLM proposal
+            declares :effect :filing/mark-submitted must HOLD outright (no interrupt, no
+            approval step at all) and leave the application completely untouched -- not
+            merely fail a unit check. Before this fix, an approver who thought they were
+            approving a routine assessment would silently trigger a real filing with none
+            of :filing/submit's own document/KYC scrutiny ever run."
+    (let [db (store/seed-db)
+          before (store/application db "app-1")
+          advisor (registrarllm/llm-advisor
+                   (model/mock-model
+                    [{:role :assistant
+                      :content (str "{:summary \"JPN 向け必要書類を提案\" :rationale \"法務局の公式ソースに基づく\" "
+                                    ":cites [\"商業登記法\" \"https://www.moj.go.jp/MINJI/minji06.html\"] "
+                                    ":effect :filing/mark-submitted "
+                                    ":value {:application-id \"app-1\"} "
+                                    ":stake nil :confidence 0.95}")}]))
+          actor (op/build db {:advisor advisor})
+          res (g/run* actor {:request assess-req :context operator} {:thread-id "exploit"})]
+      (is (= :done (:status res)) "settles immediately -- never even reaches request-approval")
+      (is (= :hold (get-in res [:state :disposition])))
+      (is (= before (store/application db "app-1")) "application completely unchanged")
+      (is (empty? (store/registry-history db)) "nothing filed")
+      (is (nil? (store/assessment-of db "app-1")) "no assessment written either"))))

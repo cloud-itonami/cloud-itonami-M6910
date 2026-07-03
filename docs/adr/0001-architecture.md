@@ -397,6 +397,68 @@ a query over an immutable log」と明記しているが、コードはこれを
 
 55 tests / 260 assertions 全体 green、lint clean。
 
+## Addendum 12 (2026-07-03) -- advisor の自己申告 `:effect` が検証されず、無害な op で実登記が起こせた（本 ADR 中で最も重大な修正）
+
+発見（実機再現で確認、`formation.operation/build` を `llm-advisor` +
+`langchain.model/mock-model` で実際に走らせて検証）: `formation.operation/
+commit-record` は commit する `:effect` を advisor の提案からそのまま
+取る（`{:effect (:effect proposal) ...}`）。一方 `formation.governor` の
+既存チェックは**すべてリクエストの `:op` を見て判定する**
+（`spec-basis-violations` の対象op集合、`document-violations` の
+`(= op :filing/submit)`、`officers-at-stake` の `case op` 等）。この2つの
+事実の間には、`:effect` が `:op` に対応する正しいものであることを保証する
+チェックが**一つも無かった**。
+
+結果: `:op :jurisdiction/assess`（無害に見える「法域アセスメント」）
+というリクエストに対し、advisor（`mock-advisor` は常に正しい `:effect`
+を返すため無関係。危険なのは**実LLMを使う `llm-advisor` 経路**）が
+`:effect :filing/mark-submitted`（実登記提出と同じSSoT変更）を返す
+提案を出すと:
+
+- `spec-basis-violations` は op=`:jurisdiction/assess` に対する検査
+  （`:cites` の有無）しか行わず、advisor が JPN の本物の spec-basis を
+  引用していれば通過する。
+- `document-violations`（filing の書類充足チェック）は
+  `(= op :filing/submit)` が false のため**そもそも実行されない**。
+- `officers-at-stake` も op=`:jurisdiction/assess` では `nil` を返す
+  ため、`sanctions-violations` / `kyc-completeness-violations` も
+  **実質的にノーオペレーション**。
+- `formation.phase/gate` は op=`:jurisdiction/assess` を見て
+  「(writes に含まれるが auto ではない) → escalate」と判定するので、
+  人間の承認画面には「JPN 向け必要書類を提案」という**無害なサマリ**が
+  表示される。
+
+これを承認すると `:commit` ノードは `record`（`:effect
+:filing/mark-submitted`）をそのまま `store/commit-record!` に渡し、
+**アセスメント・書類確認・KYCスクリーニングを一度も経ずに実登記が完了**
+した（実機再現で確認: `:status :filed`・registry-number 付与・LEI発行・
+registry-history へ incorporation-draft 追記、すべて一発）。承認者は
+「アセスメントを承認したつもり」で、実際には filing を実行していた。
+Addendum 9（post-filing-intake バイパス）は登記**後**の書き換えに限定
+された穴だったが、これは登記**そのもの**を無検証で起こせる、より
+根本的な穴だった。
+
+修正: `formation.governor/op->effect`（新規）でリクエストの `:op` ごとに
+唯一正当な `:effect` を固定するテーブルを定義し、`effect-mismatch-
+violations`（新規、HARD、**チェック順序で最初**）で `(:effect proposal)`
+がそのテーブルと一致することを要求。不一致は `:effect-mismatch` で
+un-overridable hold（escalate すらしない -- 人間の目に触れる前に止まる）。
+`mock-advisor` の `infer` は元々どの op でも正しい `:effect` を返す設計
+だったため、既存55テストは無変更で green（この穴は最初から `llm-advisor`
+経路専用だった）。
+
+2 tests / 6 assertions を追加:
+- `llm-answering-an-assessment-request-with-a-filing-effect-is-rejected`
+  -- governor 単体で `:hard?` かつ `:effect-mismatch` を確認。
+- `effect-mismatch-cannot-actually-file-through-the-full-actor-graph`
+  -- `formation.operation/build` を実際に `llm-advisor` で走らせ、
+  修正前は実登記まで到達した同一の攻撃シナリオが、修正後は
+  **即座に hold し（interrupt すら起きない）、application/registry-
+  history/assessment のいずれも一切変化しない**ことを確認（実機再現
+  スクリプトで修正前後の挙動差を確認済み）。
+
+57 tests / 267 assertions 全体 green、lint clean。
+
 ## 代替案と不採用理由
 
 | 案 | 採否 | 理由 |

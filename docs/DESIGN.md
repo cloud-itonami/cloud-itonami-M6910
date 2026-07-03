@@ -43,31 +43,43 @@ formation.operation/build          (OperationActor: langgraph-clj StateGraph)
 
 ## 4. RegistrarGovernor（独立検閲層）
 
-9チェック、優先順位順。最初の7つは HARD（人間が承認で上書き不可）:
+10チェック、優先順位順。最初の8つは HARD（人間が承認で上書き不可）:
 
-1. **spec-basis** -- `:jurisdiction/assess` / `:filing/submit` /
+1. **effect-matches-op** -- 提案の `:effect`（commit 時に実際にSSoTへ
+   書き込まれる内容）が、リクエストの `:op` に紐づく**唯一正当な**
+   `:effect`（`formation.governor/op->effect`）と一致しているか。
+   `formation.operation/commit-record` は `:effect` を advisor（信頼
+   できない実LLMを含む）の提案からそのまま取るため、この検査が無いと
+   `:jurisdiction/assess` という無害に見えるリクエストに対して
+   `:effect :filing/mark-submitted` を返す提案が通り得る -- しかも
+   以下の全チェックはリクエストの `:op` を見て判定するため、「assess
+   として無害に見える」まま実際には filing 相当の書き込みが実行され、
+   spec-basis-for-filing・document-complete・KYC-complete の**どれも
+   一度も検査されない**まま実登記が完了してしまう（実機再検証済み:
+   Addendum 12）。
+2. **spec-basis** -- `:jurisdiction/assess` / `:filing/submit` /
    `:registry/amend` / `:registry/dissolve` の提案が `formation.facts` の
    公式ソースを引用しているか。引用が無ければ「法域要件の捏造」とみなし
    hold。**registry_number の存在だけでは足りない** -- 「変更/解散する
    記録がある」ことと「その法域での変更/解散手続きの法的根拠を知っている」
    ことは別で、amend/dissolve も spec-basis 引用を要求する。
-2. **sanctions-hit** -- この提案に**関わる officer**（`formation.governor/
+3. **sanctions-hit** -- この提案に**関わる officer**（`formation.governor/
    officers-at-stake` -- filing なら申請の全officer、amendment なら
    `changed-fields :officers` が導入する新しいofficerだけ）が制裁/PEPリスト
    に一致していないか（このリクエストで判明した場合・既に store に記録済み
    の場合の両方をチェック）。一致すれば un-overridable hold。**住所変更のみ
    の amendment は officer に触れないので、この検査の対象にすら入らない**
    （無関係な officer の状態で不当にブロックしない）。
-3. **kyc-complete** -- 同じ `officers-at-stake` の**全員**が実際に KYC
+4. **kyc-complete** -- 同じ `officers-at-stake` の**全員**が実際に KYC
    スクリーニング済み(`:verdict :clear`)か。未スクリーニング（`nil`）は
    `:hit` ではないため `sanctions-hit` チェックだけでは検出できない --
    一度もスクリーニングされていない officer がいる filing、あるいは
    amendment で新規追加された未クリアの officer が、そのまま通ってしまう
    抜け穴を塞ぐ。
-4. **document-complete** -- `:filing/submit` の時点で、法域の必要書類が
+5. **document-complete** -- `:filing/submit` の時点で、法域の必要書類が
    実際に充足しているか（advisor の自己申告 confidence を信用せず、
    governor 自身が `formation.facts/required-docs-satisfied?` で検証）。
-5. **post-filing-intake-block** -- `:application/intake` は**どのフェーズの
+6. **post-filing-intake-block** -- `:application/intake` は**どのフェーズの
    `:auto` にも含まれる唯一の op**（`formation.phase`、事前入力を速くする
    ため）。それゆえ、対象申請が既に `:filed` または `:dissolved` なら
    intake 自体を hold する。さもないと capital・address・officers・status
@@ -76,16 +88,16 @@ formation.operation/build          (OperationActor: langgraph-clj StateGraph)
    迂回するバックドアになる。修正は常に「`:registry/amend`（または
    `:registry/dissolve`）を使う」であり、「intake を承認する」ではない
    （そもそも intake は escalate すらせず即 hold のため承認経路が無い）。
-6. **amendment-target** -- `:registry/amend` の対象申請に registry_number
+7. **amendment-target** -- `:registry/amend` の対象申請に registry_number
    （= 初回登記済み）があるか、かつ変更内容が空でないか。未登記への変更登記
    提案・空の変更提案はどちらも hold。
-7. **dissolution-target** -- `:registry/dissolve` の対象申請に
+8. **dissolution-target** -- `:registry/dissolve` の対象申請に
    registry_number があるか、かつ既に解散済み（二重解散）でないか。
 
 残り2つは SOFT（人間が承認すればよい）:
 
-8. **confidence floor** -- confidence が閾値未満なら escalate。
-9. **actuation gate** -- `:stake :actuation`（実際の政府提出・実際の変更
+9. **confidence floor** -- confidence が閾値未満なら escalate。
+10. **actuation gate** -- `:stake :actuation`（実際の政府提出・実際の変更
    登記提出・実際の解散登記提出・実際の手数料送金）は常に escalate。
    **`formation.phase` のどのフェーズの `:auto` 集合にも `:filing/submit`
    / `:registry/amend` / `:registry/dissolve` を含めない**ことと合わせて、

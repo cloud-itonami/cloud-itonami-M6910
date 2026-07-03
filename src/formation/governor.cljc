@@ -6,7 +6,7 @@
   proposal and fall back to HOLD -- the company-formation analog of
   robotaxi's Minimal Risk Condition and gftd-talent-actor's PolicyGovernor.
 
-  Nine checks, in priority order. The first seven are HARD violations: a
+  Ten checks, in priority order. The first eight are HARD violations: a
   human approver CANNOT override them (you don't get to approve your way
   past a sanctions hit or a fabricated legal requirement). The last two are
   SOFT: they ask a human to look (low confidence / actuation), and the
@@ -15,21 +15,36 @@
   fee payment) NO phase ever allows auto-commit either. Two independent
   layers agree that actuation is always a human call.
 
-    1. Spec-basis        -- did the jurisdiction proposal cite an OFFICIAL
+    1. Effect matches op -- does the proposal's :effect (what actually
+                             gets written to the SSoT on commit) match the
+                             ONE legitimate effect for the REQUEST's :op
+                             (`op->effect`)? Every check below keys off
+                             the request's :op, not the proposal's
+                             self-reported :effect -- without this check
+                             first, an advisor (an untrusted, possibly
+                             hallucinating real LLM) could answer a
+                             harmless-looking :jurisdiction/assess request
+                             with `:effect :filing/mark-submitted`, and a
+                             human approving what looks like an assessment
+                             would silently trigger a REAL filing with
+                             none of :filing/submit's own scrutiny
+                             (spec-basis-for-filing, document-complete,
+                             KYC-complete) ever run.
+    2. Spec-basis        -- did the jurisdiction proposal cite an OFFICIAL
                              source (`formation.facts`), or invent one?
-    2. Sanctions hold     -- does any officer AT STAKE in this proposal
+    3. Sanctions hold     -- does any officer AT STAKE in this proposal
                              (a filing's full roster, or an amendment's
                              newly-introduced officers) carry a
                              sanctions/PEP hit (screened or on file)?
-    3. KYC complete       -- has EVERY officer at stake actually been
+    4. KYC complete       -- has EVERY officer at stake actually been
                              screened and cleared? A never-screened
                              officer is not a hit (nil != :hit), so
                              `sanctions-hit` alone would let a filing (or
                              an amendment adding a new director) through
                              with zero screening ever performed.
-    4. Document complete  -- for a filing proposal, are the jurisdiction's
+    5. Document complete  -- for a filing proposal, are the jurisdiction's
                              required docs actually satisfied?
-    5. Post-filing intake -- `:application/intake` is the ONLY op any
+    6. Post-filing intake -- `:application/intake` is the ONLY op any
                              phase ever puts in its `:auto` set (it
                              auto-commits with NO human approval). Once an
                              application is :filed or :dissolved, intake
@@ -40,15 +55,15 @@
                              screen officers and always require a human.
                              Without this, intake is an unguarded
                              backdoor around the entire actuation gate.
-    6. Amendment target   -- for an amendment proposal, is there an
+    7. Amendment target   -- for an amendment proposal, is there an
                              existing registry number to amend, and is the
                              amendment actually non-empty?
-    7. Dissolution target -- for a dissolution proposal, is there an
+    8. Dissolution target -- for a dissolution proposal, is there an
                              existing registry number to dissolve, and is
                              the entity not ALREADY dissolved (no double
                              dissolution)?
-    8. Confidence floor   -- LLM confidence below threshold -> escalate.
-    9. Actuation gate     -- :stake :actuation -> always escalate; never
+    9. Confidence floor   -- LLM confidence below threshold -> escalate.
+   10. Actuation gate     -- :stake :actuation -> always escalate; never
                              auto, at any phase (structural, not a policy
                              toggle)."
   (:require [formation.facts :as facts]
@@ -63,6 +78,35 @@
   #{:actuation})
 
 ;; ----------------------------- checks -----------------------------
+
+(def op->effect
+  "The ONE legitimate `:effect` a proposal may declare for each op --
+  `formation.operation/commit-record` takes `:effect` straight from the
+  (untrusted) advisor proposal with no cross-check of its own, so this
+  table is the only thing standing between 'the request says :jurisdiction/
+  assess' and 'the SSoT mutation that actually runs is :filing/mark-
+  submitted'. Every other check in this namespace keys off the REQUEST's
+  :op -- so a mismatched :effect would let all of THEIR scrutiny run
+  against the wrong (lower-stakes) op while a different, possibly far
+  higher-stakes effect gets committed."
+  {:application/intake  :application/upsert
+   :jurisdiction/assess :assessment/set
+   :kyc/screen          :kyc/set
+   :filing/submit       :filing/mark-submitted
+   :registry/amend      :registry/amend-submitted
+   :registry/dissolve   :registry/dissolve-submitted})
+
+(defn- effect-mismatch-violations
+  "HARD, checked first: a proposal whose :effect is not the one paired
+  with the request's :op in `op->effect` is rejected outright, before any
+  op-specific check below even runs -- see `op->effect`'s docstring for
+  why this must come first."
+  [{:keys [op]} proposal]
+  (when-let [expected (op->effect op)]
+    (when (not= expected (:effect proposal))
+      [{:rule :effect-mismatch
+        :detail (str "op " op " の提案は :effect " expected
+                     " のはずが実際には " (:effect proposal) " になっている")}])))
 
 (defn- spec-basis-violations
   "A `:jurisdiction/assess`, `:filing/submit`, `:registry/amend` or
@@ -199,7 +243,8 @@
    - :ok?         -- clean AND not escalating: safe to auto-commit."
   [request _context proposal st]
   (let [hard (into []
-                   (concat (spec-basis-violations request proposal)
+                   (concat (effect-mismatch-violations request proposal)
+                           (spec-basis-violations request proposal)
                            (sanctions-violations request proposal st)
                            (kyc-completeness-violations request proposal st)
                            (document-violations request st)
