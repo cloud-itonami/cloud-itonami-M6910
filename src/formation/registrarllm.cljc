@@ -144,21 +144,29 @@
   gated exactly like `:filing/submit`: never auto-committed at any phase
   (`formation.phase`), always escalated by the governor's actuation gate.
   An application that was never filed (no registry-number) has nothing to
-  amend -- the governor's hard `:no-registry-number` check catches that."
+  amend -- the governor's hard `:no-registry-number` check catches that.
+  Also cites the jurisdiction's official legal basis (same G2 discipline
+  `:jurisdiction/assess` uses) -- an amendment cannot rely only on 'there
+  is a registry number', it must point at the law that governs amending
+  it in that jurisdiction."
   [db {:keys [subject changed-fields effective-date]}]
-  (let [app (store/application db subject)]
-    (if (:registry-number app)
+  (let [app (store/application db subject)
+        sb (facts/spec-basis (:jurisdiction app))]
+    (if (and (:registry-number app) sb)
       {:summary    (str (:entity-name app) " (" (:registry-number app)
                         ") の変更登記案: " (pr-str (keys changed-fields)))
-       :rationale  (str "既存登記記録 " (:registry-number app) " への追記型修正。")
-       :cites      [(:registry-number app)]
+       :rationale  (str "既存登記記録 " (:registry-number app)
+                        " への追記型修正。法的根拠: " (:legal-basis sb))
+       :cites      [(:registry-number app) (:legal-basis sb) (:provenance sb)]
        :effect     :registry/amend-submitted
        :value      {:application-id subject :changed-fields changed-fields
                     :effective-date effective-date}
        :stake      :actuation
        :confidence 0.9}
-      {:summary    (str (:entity-name app) " は未登記のため変更登記できません")
-       :rationale  "registry_number が無い = 初回登記が未提出。"
+      {:summary    (str (:entity-name app) " は変更登記できません")
+       :rationale  (if (:registry-number app)
+                     (str (:jurisdiction app) " の公式spec-basisが見つかりません")
+                     "registry_number が無い = 初回登記が未提出。")
        :cites      []
        :effect     :registry/amend-submitted
        :value      {:application-id subject :changed-fields changed-fields
@@ -172,9 +180,11 @@
   gated exactly like `:filing/submit` / `:registry/amend`. A target that
   was never filed has nothing to dissolve, and an already-dissolved
   target cannot be dissolved twice -- both are the governor's hard
-  `:registry/dissolve`-specific checks."
+  `:registry/dissolve`-specific checks. Also cites the jurisdiction's
+  official legal basis, same G2 discipline as amendment/assessment."
   [db {:keys [subject reason effective-date]}]
-  (let [app (store/application db subject)]
+  (let [app (store/application db subject)
+        sb (facts/spec-basis (:jurisdiction app))]
     (cond
       (nil? (:registry-number app))
       {:summary "未登記のため解散できません" :rationale "registry_number が無い"
@@ -188,10 +198,18 @@
        :value {:application-id subject :reason reason :effective-date effective-date}
        :stake :actuation :confidence 0.2}
 
+      (nil? sb)
+      {:summary (str (:jurisdiction app) " の公式spec-basisが見つからず解散できません")
+       :rationale "formation.facts に未登録の法域。解散手続きの根拠を推測で作らない。"
+       :cites [] :effect :registry/dissolve-submitted
+       :value {:application-id subject :reason reason :effective-date effective-date}
+       :stake :actuation :confidence 0.2}
+
       :else
       {:summary    (str (:entity-name app) " (" (:registry-number app) ") の解散案: " reason)
-       :rationale  (str "既存登記記録 " (:registry-number app) " への追記型解散記録。")
-       :cites      [(:registry-number app)]
+       :rationale  (str "既存登記記録 " (:registry-number app)
+                        " への追記型解散記録。法的根拠: " (:legal-basis sb))
+       :cites      [(:registry-number app) (:legal-basis sb) (:provenance sb)]
        :effect     :registry/dissolve-submitted
        :value      {:application-id subject :reason reason :effective-date effective-date}
        :stake      :actuation

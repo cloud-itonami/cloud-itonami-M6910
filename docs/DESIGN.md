@@ -45,9 +45,12 @@ formation.operation/build          (OperationActor: langgraph-clj StateGraph)
 
 7チェック、優先順位順。最初の5つは HARD（人間が承認で上書き不可）:
 
-1. **spec-basis** -- `:jurisdiction/assess` / `:filing/submit` の提案が
-   `formation.facts` の公式ソースを引用しているか。引用が無ければ
-   「法域要件の捏造」とみなし hold。
+1. **spec-basis** -- `:jurisdiction/assess` / `:filing/submit` /
+   `:registry/amend` / `:registry/dissolve` の提案が `formation.facts` の
+   公式ソースを引用しているか。引用が無ければ「法域要件の捏造」とみなし
+   hold。**registry_number の存在だけでは足りない** -- 「変更/解散する
+   記録がある」ことと「その法域での変更/解散手続きの法的根拠を知っている」
+   ことは別で、amend/dissolve も spec-basis 引用を要求する。
 2. **sanctions-hit** -- 申請に関わる officer が制裁/PEPリストに一致して
    いないか（このリクエストで判明した場合・既に store に記録済みの場合の
    両方をチェック）。一致すれば un-overridable hold。

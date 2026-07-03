@@ -46,10 +46,14 @@
 ;; ----------------------------- checks -----------------------------
 
 (defn- spec-basis-violations
-  "A `:jurisdiction/assess` (or `:filing/submit`) proposal with no
-  spec-basis citation is a HARD violation -- never invent a country's law."
+  "A `:jurisdiction/assess`, `:filing/submit`, `:registry/amend` or
+  `:registry/dissolve` proposal with no spec-basis citation is a HARD
+  violation -- never invent a country's law. Amendment and dissolution
+  are not exempt from this just because a registry_number already
+  exists: 'there is a record to change' is not the same as 'we know how
+  this jurisdiction wants it changed'."
   [{:keys [op]} proposal]
-  (when (contains? #{:jurisdiction/assess :filing/submit} op)
+  (when (contains? #{:jurisdiction/assess :filing/submit :registry/amend :registry/dissolve} op)
     (let [value (:value proposal)]
       (when (or (empty? (:cites proposal))
                 (and (contains? value :spec-basis) (nil? (:spec-basis value))))

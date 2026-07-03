@@ -211,6 +211,36 @@ lint clean。
 これで incorporate → amend → dissolve の3操作すべてが同一の actuation
 不変条件（governor + phase の2層、常に人間承認）の下で動く。
 
+## Addendum 6 (2026-07-03) -- amend/dissolve に spec-basis 引用を要求（G2 discipline の一貫適用）
+
+発見: `:registry/amend` / `:registry/dissolve` は「registry_number がある
+こと」だけをチェックしていて、`:jurisdiction/assess` / `:filing/submit`
+に課している「公式ソースを引用しているか」（G2, `spec-basis-violations`）
+の対象外だった。「変更/解散する記録がある」と「その法域の変更/解散手続き
+の法的根拠を知っている」は別の主張であり、後者を検証しないのは一貫性の
+欠如だった。
+
+修正:
+
+- `formation.registrarllm/propose-amendment` / `propose-dissolution` --
+  対象 application の `:jurisdiction` から `formation.facts/spec-basis`
+  を引き、`:cites` に registry_number に加えて `:legal-basis` /
+  `:provenance` を含める。spec-basis が見つからない場合は confidence を
+  落として提案（governor が hold する前提）。
+- `formation.governor/spec-basis-violations` -- 対象 op 集合に
+  `:registry/amend` / `:registry/dissolve` を追加。
+
+この変更は通常フローでは無害（`:filing/submit` に到達した時点で
+`document-violations` 経由で spec-basis が既に検証済みのため）。実際に
+効くのは **申請の `:jurisdiction` が登記後に書き換わる**ような
+データ不整合ケース（`:application/intake` の upsert は現状 jurisdiction
+の変更を制限していない）-- そのケースでも amend/dissolve が誤った法域の
+記録を追記できないことを保証する。
+
+2 tests / 4 assertions を追加（`drift-jurisdiction-to-atl!` ヘルパーで
+登記後の法域drift を再現し、amend/dissolve 双方が `:no-spec-basis` で
+hold することを検証）。42 tests / 220 assertions 全体 green、lint clean。
+
 ## 代替案と不採用理由
 
 | 案 | 採否 | 理由 |

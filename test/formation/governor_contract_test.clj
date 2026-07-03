@@ -113,6 +113,26 @@
       (is (some #{:no-registry-number} (-> (store/ledger db) first :basis)))
       (is (empty? (store/registry-history db)) "no amendment drafted"))))
 
+(defn- drift-jurisdiction-to-atl!
+  "Simulates a data-consistency edge case: a filed application's
+  :jurisdiction field drifts to one with no spec-basis (e.g. a bad
+  upsert) AFTER filing. registry-number/status stay set from the original
+  valid filing, so only the spec-basis check protects amend/dissolve here."
+  [actor tid subject]
+  (exec-op actor tid {:op :application/intake :subject subject
+                      :patch {:id subject :jurisdiction "ATL"}} operator))
+
+(deftest amendment-requires-a-spec-basis-even-with-a-registry-number
+  (testing "a registry_number alone is not enough -- jurisdiction must still have a citable spec-basis"
+    (let [[db actor] (fresh)]
+      (file-app-1! actor)
+      (drift-jurisdiction-to-atl! actor "t8b" "app-1")
+      (let [res (exec-op actor "t8c" {:op :registry/amend :subject "app-1"
+                                      :changed-fields {:address "新住所"}
+                                      :effective-date "2026-07-03"} operator)]
+        (is (= :hold (get-in res [:state :disposition])))
+        (is (some #{:no-spec-basis} (-> (store/ledger db) last :basis)))))))
+
 (deftest amendment-with-no-changes-is-held
   (testing "an empty changed-fields amendment -> HOLD, even for a filed application"
     (let [[db actor] (fresh)]
@@ -149,6 +169,17 @@
         (is (= :hold (get-in r2 [:state :disposition])))
         (is (not= "新住所" (:address (store/application db "app-1"))))
         (is (= before-history (store/registry-history db)) "nothing appended on reject")))))
+
+(deftest dissolution-requires-a-spec-basis-even-with-a-registry-number
+  (testing "a registry_number alone is not enough -- jurisdiction must still have a citable spec-basis"
+    (let [[db actor] (fresh)]
+      (file-app-1! actor)
+      (drift-jurisdiction-to-atl! actor "t12b" "app-1")
+      (let [res (exec-op actor "t12c" {:op :registry/dissolve :subject "app-1"
+                                       :reason "voluntary wind-up"
+                                       :effective-date "2026-08-01"} operator)]
+        (is (= :hold (get-in res [:state :disposition])))
+        (is (some #{:no-spec-basis} (-> (store/ledger db) last :basis)))))))
 
 (deftest dissolution-without-a-filed-application-is-held
   (testing "an application with no registry_number has nothing to dissolve -> HOLD"
