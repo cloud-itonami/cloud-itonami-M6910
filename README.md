@@ -103,7 +103,7 @@ full architecture and decision record.
 
 | File | Role |
 |---|---|
-| `src/formation/store.cljc` | **Store** protocol -- `MemStore` (Datomic/kotoba-server swap is future work) + append-only audit ledger + draft registry history |
+| `src/formation/store.cljc` | **Store** protocol -- `MemStore` ‖ `DatomicStore` (`langchain.db`, swappable to Datomic Local or a kotoba-server pod) + append-only audit ledger + draft registry history |
 | `src/formation/registry.cljc` | ISO 17442 LEI issuance (ISO 7064 MOD 97-10) + incorporation/amendment draft records -- ported from `matsurigoto`'s corp-registry (etzhayyim/root, ADR-2606062300) |
 | `src/formation/facts.cljc` | Per-jurisdiction requirement catalog with an official spec-basis citation per entry, honest coverage reporting |
 | `src/formation/registrarllm.cljc` | **Registrar-LLM Advisor** -- `mock-advisor` ‖ `llm-advisor`; intake/assessment/KYC/filing proposals |
@@ -111,7 +111,7 @@ full architecture and decision record.
 | `src/formation/phase.cljc` | **Phase 0→3** -- read-only → assisted intake → assisted assess/screen → supervised (filing always human) |
 | `src/formation/operation.cljc` | **OperationActor** -- langgraph-clj StateGraph |
 | `src/formation/sim.cljc` | demo driver |
-| `test/formation/*_test.clj` | governor contract · phase invariants · LEI conformance · facts coverage |
+| `test/formation/*_test.clj` | governor contract · phase invariants · LEI conformance · facts coverage · MemStore ≡ DatomicStore parity |
 
 ## Jurisdiction coverage (honest)
 
