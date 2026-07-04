@@ -30,7 +30,7 @@ jobs:
     steps:
       # lay the west workspace out so ../../com-junkawasaki/* resolves
       - uses: actions/checkout@v4
-        with: { path: orgs/cloud-itonami/cloud-itonami-M6910 }
+        with: { path: orgs/cloud-itonami/cloud-itonami-isic-6910 }
       - uses: actions/checkout@v4
         with:
           repository: com-junkawasaki/langgraph-clj
@@ -44,5 +44,5 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.0
         with: { cli: latest }
       - name: test (governor contract · phase invariants · LEI conformance · facts coverage · store parity · llm advisor)
-        working-directory: orgs/cloud-itonami/cloud-itonami-M6910
+        working-directory: orgs/cloud-itonami/cloud-itonami-isic-6910
         run: clojure -M:dev:test

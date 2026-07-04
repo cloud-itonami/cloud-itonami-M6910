@@ -1,6 +1,6 @@
-# cloud-itonami-M6910
+# cloud-itonami-isic-6910
 
-[![ci](https://github.com/cloud-itonami/cloud-itonami-M6910/actions/workflows/ci.yml/badge.svg)](https://github.com/cloud-itonami/cloud-itonami-M6910/actions/workflows/ci.yml)
+[![ci](https://github.com/cloud-itonami/cloud-itonami-isic-6910/actions/workflows/ci.yml/badge.svg)](https://github.com/cloud-itonami/cloud-itonami-isic-6910/actions/workflows/ci.yml)
 
 Open Business Blueprint for **ISIC Rev.5 6910**: legal activities, focused
 on company incorporation / registration-agent services. This repository

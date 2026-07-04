@@ -1,6 +1,6 @@
 # Governance
 
-`cloud-itonami-M6910` is an OSS open-business blueprint. Governance covers
+`cloud-itonami-isic-6910` is an OSS open-business blueprint. Governance covers
 both code and the operator model.
 
 ## Maintainers

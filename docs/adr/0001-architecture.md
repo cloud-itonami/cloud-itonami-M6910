@@ -1,4 +1,4 @@
-# ADR-0001: cloud-itonami-M6910 — Registrar-LLM を封じ込めた知能ノードとする会社設立代行アクター設計
+# ADR-0001: cloud-itonami-isic-6910 — Registrar-LLM を封じ込めた知能ノードとする会社設立代行アクター設計
 
 - Status: Accepted (2026-07-03)
 - 関連: `robotaxi-actor` ADR-0001（研究モデルを信頼境界に封じ込める actor 設計）、

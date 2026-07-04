@@ -1,4 +1,4 @@
-{:itonami.blueprint/id "cloud-itonami-M6910"
+{:itonami.blueprint/id "cloud-itonami-isic-6910"
  :itonami.blueprint/name "Global Incorporation Actor"
  :itonami.blueprint/isic-rev5 "6910"
  :itonami.blueprint/domain :legal/company-formation

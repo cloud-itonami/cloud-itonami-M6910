@@ -1,11 +1,11 @@
-# Open Business Blueprint: cloud-itonami-M6910
+# Open Business Blueprint: cloud-itonami-isic-6910
 
 This repository publishes an OSS business model for operating a
 company-incorporation / registration-agent service on itonami.cloud.
 
 ## Classification
 
-- Repository name: `cloud-itonami-M6910`
+- Repository name: `cloud-itonami-isic-6910`
 - Primary classification: ISIC Rev.5 6910
 - Activity: legal activities (company-formation / registration-agent
   services fall under this class in ISIC)
@@ -112,13 +112,13 @@ leads.
 ## Marketplace Metadata
 
 ```edn
-{:itonami.blueprint/id "cloud-itonami-M6910"
+{:itonami.blueprint/id "cloud-itonami-isic-6910"
  :itonami.blueprint/name "Global Incorporation Actor"
  :itonami.blueprint/isic-rev5 "6910"
  :itonami.blueprint/domain :legal/company-formation
  :itonami.blueprint/license "AGPL-3.0-or-later"
  :itonami.blueprint/operator-model :certified-open-business
- :itonami.blueprint/repo "https://github.com/cloud-itonami/cloud-itonami-M6910"
+ :itonami.blueprint/repo "https://github.com/cloud-itonami/cloud-itonami-isic-6910"
  :itonami.blueprint/status :public-oss}
 ```
 

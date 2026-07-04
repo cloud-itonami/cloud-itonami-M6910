@@ -1,6 +1,6 @@
 # Contributing
 
-`cloud-itonami-M6910` accepts contributions to the OSS actor, governor
+`cloud-itonami-isic-6910` accepts contributions to the OSS actor, governor
 tests, documentation, jurisdiction packs and open business blueprint.
 
 ## Development

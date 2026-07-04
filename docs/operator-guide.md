@@ -1,13 +1,13 @@
 # Operator Guide
 
 This guide is for people who want to start an open business from
-`cloud-itonami-M6910`.
+`cloud-itonami-isic-6910`.
 
 ## 1. Fork and Run
 
 ```bash
-git clone https://github.com/cloud-itonami/cloud-itonami-M6910
-cd cloud-itonami-M6910
+git clone https://github.com/cloud-itonami/cloud-itonami-isic-6910
+cd cloud-itonami-isic-6910
 clojure -M:dev:test
 clojure -M:dev:run
 ```
