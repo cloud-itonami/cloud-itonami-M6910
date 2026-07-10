@@ -7,4 +7,5 @@
  :itonami.blueprint/governor :registrar-governor
  :itonami.blueprint/robotics false
  :itonami.blueprint/required-technologies [:identity :forms :dmn :bpmn :audit-ledger]
+ :itonami.blueprint/optional-technologies [:corporate-intelligence]
  :itonami.blueprint/status :public-oss}
