@@ -2,9 +2,11 @@ name: ci
 
 # This project is a west project in the com-junkawasaki/root superproject; its
 # deps reference sibling repos via :local/root
-# (../../com-junkawasaki/langgraph-clj, .../langchain-clj). Those two are
-# PUBLIC, so the test job reconstructs the workspace layout by checking them
-# out into the expected relative paths -- no token needed. Same pattern as
+# (../../com-junkawasaki/langgraph-clj, .../langchain-clj, and
+# ../cloud-itonami-isic-8291 for the optional formation.corporate-intel
+# cross-reference, ADR-2607110400 §5). All PUBLIC, so the test job
+# reconstructs the workspace layout by checking them out into the expected
+# relative paths -- no token needed. Same pattern as
 # cloud-itonami-6310 / ai-gftd-itonami's ci.yml.
 
 on:
@@ -39,6 +41,10 @@ jobs:
         with:
           repository: com-junkawasaki/langchain-clj
           path: orgs/com-junkawasaki/langchain-clj
+      - uses: actions/checkout@v4
+        with:
+          repository: cloud-itonami/cloud-itonami-isic-8291
+          path: orgs/cloud-itonami/cloud-itonami-isic-8291
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "21" }
       - uses: DeLaGuardo/setup-clojure@13.0

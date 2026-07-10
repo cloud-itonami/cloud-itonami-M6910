@@ -73,12 +73,27 @@
        :stake      nil
        :confidence 0.9})))
 
+(def default-corporate-intel-screen
+  "No-op corporate-intelligence cross-reference: always 'nothing on file'.
+  This is the default so every existing caller of `screen-kyc`/`infer`/
+  `mock-advisor` keeps its exact prior behavior unless it explicitly wires
+  in `formation.corporate-intel/screen` (or an equivalent). Not required
+  from this namespace directly -- keeping the dependency optional at the
+  registrarllm level, injected only by whoever builds the advisor."
+  (constantly {:found? false :hit? false}))
+
 (defn- screen-kyc
   "KYC / sanctions screening draft. `:sanctions-hit?` on the officer record
   injects the failure mode: the RegistrarGovernor must HOLD, un-overridably,
   on any sanctions/PEP hit. Missing identification yields low confidence ->
-  escalate rather than auto-clear."
-  [db {:keys [subject]}]
+  escalate rather than auto-clear.
+
+  `screen-fn` (officer name -> corporate-intel result, see
+  `formation.corporate-intel/screen`) is consulted ONLY once the local
+  checks are otherwise clean -- it can turn a would-be :clear into :hit or
+  :incomplete, but a local sanctions-hit or missing id-doc is decided
+  first, cheaply, without depending on an external actor at all."
+  [db {:keys [subject]} screen-fn]
   (let [off (store/officer db subject)]
     (cond
       (nil? off)
@@ -105,13 +120,43 @@
        :confidence 0.4}
 
       :else
-      {:summary    (str (:name off) ": 制裁リスト一致なし、本人確認書類あり")
-       :rationale  "本人確認書類確認 + 制裁リスト非一致。"
-       :cites      [:id-doc :sanctions-list]
-       :effect     :kyc/set
-       :value      {:officer-id subject :verdict :clear}
-       :stake      nil
-       :confidence 0.9})))
+      (let [ci (screen-fn (:name off))]
+        (cond
+          (:hit? ci)
+          {:summary    (str (:name off) ": corporate-intelligence 照会で制裁/PEPフラグを検出")
+           :rationale  "cloud-itonami-isic-8291 の名前スクリーニングが一致を検出。人手確認とホールドが必須。"
+           :cites      [:corporate-intelligence]
+           :effect     :kyc/set
+           :value      {:officer-id subject :verdict :hit}
+           :stake      nil
+           :confidence 0.9}
+
+          (:pending-human-review? ci)
+          {:summary    (str (:name off) ": corporate-intelligence 照会が人手レビュー待ち")
+           :rationale  "cloud-itonami-isic-8291 側の DisclosureGovernor が high-stakes escalate 中。確定するまでクリアにできない。"
+           :cites      [:corporate-intelligence]
+           :effect     :kyc/set
+           :value      {:officer-id subject :verdict :incomplete}
+           :stake      nil
+           :confidence 0.5}
+
+          (:held? ci)
+          {:summary    (str (:name off) ": corporate-intelligence 照会が拒否された(契約/設定の問題)")
+           :rationale  (str "cloud-itonami-isic-8291 の DisclosureGovernor が本テナントの照会を拒否: " (pr-str (:reason ci)))
+           :cites      [:corporate-intelligence]
+           :effect     :kyc/set
+           :value      {:officer-id subject :verdict :incomplete}
+           :stake      nil
+           :confidence 0.4}
+
+          :else
+          {:summary    (str (:name off) ": 制裁リスト非一致、本人確認書類あり")
+           :rationale  "本人確認書類確認 + 制裁リスト非一致 + corporate-intelligence 照会クリア(または未収載)。"
+           :cites      [:id-doc :sanctions-list :corporate-intelligence]
+           :effect     :kyc/set
+           :value      {:officer-id subject :verdict :clear}
+           :stake      nil
+           :confidence 0.9})))))
 
 (defn- propose-filing
   "Draft the actual government-submission + fee-payment action. ALWAYS
@@ -217,17 +262,20 @@
 
 (defn infer
   "Route a request to the right proposal generator.
-  request: {:op kw :subject id ...op-specific...}"
-  [db {:keys [op] :as request}]
-  (case op
-    :application/intake   (normalize-intake db request)
-    :jurisdiction/assess  (assess-jurisdiction db request)
-    :kyc/screen           (screen-kyc db request)
-    :filing/submit        (propose-filing db request)
-    :registry/amend       (propose-amendment db request)
-    :registry/dissolve    (propose-dissolution db request)
-    {:summary "未対応の操作" :rationale (str op) :cites []
-     :effect :noop :stake nil :confidence 0.0}))
+  request: {:op kw :subject id ...op-specific...}
+  `screen-fn` (default: `default-corporate-intel-screen`, a no-op) is only
+  consulted by `:kyc/screen`, once local checks are otherwise clean."
+  ([db request] (infer db request default-corporate-intel-screen))
+  ([db {:keys [op] :as request} screen-fn]
+   (case op
+     :application/intake   (normalize-intake db request)
+     :jurisdiction/assess  (assess-jurisdiction db request)
+     :kyc/screen           (screen-kyc db request screen-fn)
+     :filing/submit        (propose-filing db request)
+     :registry/amend       (propose-amendment db request)
+     :registry/dissolve    (propose-dissolution db request)
+     {:summary "未対応の操作" :rationale (str op) :cites []
+      :effect :noop :stake nil :confidence 0.0})))
 
 ;; ----------------------------- Advisor protocol -----------------------------
 
@@ -235,8 +283,16 @@
   (-advise [advisor store request] "store + request -> proposal map"))
 
 (defn mock-advisor
-  "The deterministic advisor (the `infer` logic above). Default everywhere."
-  [] (reify Advisor (-advise [_ st req] (infer st req))))
+  "The deterministic advisor (the `infer` logic above). Default everywhere.
+  opts:
+    :corporate-intel-screen -- officer name -> corporate-intel result (see
+      `formation.corporate-intel/screen`). Default: no-op (never changes a
+      screen-kyc verdict), so `(mock-advisor)` with no args keeps every
+      existing caller's exact prior behavior."
+  ([] (mock-advisor {}))
+  ([{:keys [corporate-intel-screen]
+     :or   {corporate-intel-screen default-corporate-intel-screen}}]
+   (reify Advisor (-advise [_ st req] (infer st req corporate-intel-screen)))))
 
 (def ^:private system-prompt
   (str "あなたは法人設立(会社登記)エージェントの助言者です。与えられた事実のみに"

@@ -8,7 +8,9 @@
   the audit ledger + the draft registry record history."
   (:require [langgraph.graph :as g]
             [formation.store :as store]
-            [formation.operation :as op]))
+            [formation.operation :as op]
+            [formation.registrarllm :as registrarllm]
+            [formation.corporate-intel :as ci]))
 
 (def operator {:actor-id "op-1" :actor-role :registrar :phase 3})
 
@@ -63,6 +65,18 @@
 
     (println "== jurisdiction/assess app-2 (no spec-basis -> HARD hold) ==")
     (println (exec! actor "t6" {:op :jurisdiction/assess :subject "app-2" :no-spec? true} operator))
+
+    (println "== cloud-itonami-isic-8291 corporate-intelligence integration (ADR-2607110400 §5) ==")
+    (println "   o-4 (\"Jane Smith (demo)\") is clean on every LOCAL field -- no :sanctions-hit?, has")
+    (println "   an id-doc -- but shares a name with 8291's own sanctions-flagged demo official.")
+    (let [ci-db (store/seed-db)
+          ci-actor (op/build ci-db {:advisor (registrarllm/mock-advisor {:corporate-intel-screen ci/screen})})]
+      (println "-- without the integration, o-4 would screen :clear (see governor_contract_test.clj-style flow) --")
+      (println "== kyc/screen o-4, WITH corporate-intel wired in (escalates -- 8291 itself defers to its own human first) ==")
+      (println (exec! ci-actor "ci-1" {:op :kyc/screen :subject "o-4"} operator))
+      (println "-- human operator approves --")
+      (println (approve! ci-actor "ci-1"))
+      (println "   verdict:" (:verdict (store/kyc-of ci-db "o-4")) "(:incomplete, never :clear -- the gap is closed)"))
 
     (println "== audit ledger ==")
     (doseq [f (store/ledger db)] (println f))

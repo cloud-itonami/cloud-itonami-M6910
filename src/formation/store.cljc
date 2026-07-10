@@ -58,7 +58,14 @@
     ;; not on any application by default -- a spare officer for tests that
     ;; need a :sanctions-hit? false / :id-doc nil officer (screens to
     ;; :incomplete, never :clear, without also tripping :sanctions-hit).
-    "o-3" {:id "o-3" :name "鈴木 花子" :sanctions-hit? false :id-doc nil}}})
+    "o-3" {:id "o-3" :name "鈴木 花子" :sanctions-hit? false :id-doc nil}
+    ;; deliberately clean on EVERY local field (no :sanctions-hit?, has an
+    ;; id-doc) -- this name is shared with cloud-itonami-isic-8291's own
+    ;; demo data (a sanctions-flagged official), so it exists purely to
+    ;; prove formation.corporate-intel's cross-reference catches a hit
+    ;; 6910's local-only checks would otherwise miss entirely.
+    "o-4" {:id "o-4" :name "Jane Smith (demo)" :sanctions-hit? false
+           :id-doc "passport-uk-****5678"}}})
 
 ;; ----------------------------- shared filing logic -----------------------------
 

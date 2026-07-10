@@ -123,8 +123,9 @@ full architecture and decision record.
 | `src/formation/governor.cljc` | **RegistrarGovernor** -- effect-matches-op · spec-basis · sanctions hold · KYC-complete · document-complete · post-filing-intake-block · intake-fabrication · amendment-target · dissolution-target · confidence floor · actuation gate |
 | `src/formation/phase.cljc` | **Phase 0→3** -- read-only → assisted intake → assisted assess/screen → supervised (filing always human) |
 | `src/formation/operation.cljc` | **OperationActor** -- langgraph-clj StateGraph |
+| `src/formation/corporate_intel.cljc` | optional cross-reference into [`cloud-itonami-isic-8291`](https://github.com/cloud-itonami/cloud-itonami-isic-8291)'s `:disclosure/screen-name` (ADR-2607110400 §5) -- catches an officer clean on every LOCAL field but flagged in 8291's own sourced PEP/sanctions data; wired into `screen-kyc` via an injected fn, default is a no-op so every prior caller's behavior is unchanged unless explicitly opted in |
 | `src/formation/sim.cljc` | demo driver |
-| `test/formation/*_test.clj` | governor contract (incl. cross-backend on DatomicStore) · phase invariants · LEI conformance · facts coverage · MemStore ≡ DatomicStore CRUD parity · real-LLM advisor (mock-model) |
+| `test/formation/*_test.clj` | governor contract (incl. cross-backend on DatomicStore) · phase invariants · LEI conformance · facts coverage · MemStore ≡ DatomicStore CRUD parity · real-LLM advisor (mock-model) · corporate-intelligence integration |
 
 ## Jurisdiction coverage (honest)
 
