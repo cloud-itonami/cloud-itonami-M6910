@@ -1,0 +1,330 @@
+(ns formation.render-html
+  "Build-time HTML renderer for `docs/samples/operator-console.html`.
+
+  Closes flagship checklist item 2 (com-junkawasaki/root ADR-2607189300,
+  Wave5 rollout): this repo previously had NO demo page and no generator at
+  all. This namespace drives the REAL actor stack (`formation.operation` ->
+  `formation.governor` -> `formation.store`) through a scenario built from
+  this repo's own seeded demo data (`formation.store/demo-data`) and renders
+  the result deterministically -- no invented numbers, no timestamps in the
+  page content, byte-identical across reruns against the same seed (verified
+  by diffing two consecutive runs before shipping).
+
+  Deliberately does NOT wire in `formation.corporate-intel` (the optional
+  cross-reference into the separate `cloud-itonami-isic-8291` repo -- see
+  `formation.corporate-intel`'s own docstring and `deps.edn`'s comment: 'Only
+  formation.corporate-intel itself requires dossier.* -- registrarllm/
+  operation/governor have zero compile-time dependency on it'). Confirmed by
+  actually running `clojure -M:dev:run` (this repo's own `formation.sim`,
+  which DOES wire corporate-intel in) on a completely untouched fresh clone
+  before writing a single line here: it fails to even compile, with
+  `Syntax error compiling at (dossier/llm.cljc:254:37): Unable to resolve
+  symbol: propose-discover-candidates in this context` -- a genuine,
+  pre-existing bug in the SEPARATE `cloud-itonami-isic-8291` repo
+  (`dossier.llm/infer`'s `case` references `propose-discover-candidates` at
+  line 254, defined only later at line 322, with no forward `declare`;
+  confirmed byte-identical to that repo's live `main` tip via the GitHub
+  API, so this is not a stale-clone artifact). That bug is out of scope for
+  this repo's own flagship checklist item and is not touched here; this
+  renderer instead exercises the full REAL core actor (registrar-LLM ->
+  governor -> store) on its own, which needs no such integration and is
+  fully healthy (confirmed by this repo's own test suite passing 0
+  failures/0 errors on every namespace except `formation.corporate-intel-
+  test`, the one test file that transitively requires the broken external
+  namespace).
+
+  Usage: `clojure -M:dev:render-html [out-file]`
+  (default `docs/samples/operator-console.html`)."
+  (:require [clojure.string :as str]
+            [formation.store :as store]
+            [formation.operation :as op]
+            [langgraph.graph :as g]))
+
+;; ----------------------------- harness (unchanged across every repo
+;; in this cluster -- do not rewrite, only copy) -----------------------
+
+(def ^:private operator
+  {:actor-id "op-1" :actor-role :registrar :phase 3})
+
+(defn- exec! [actor tid request]
+  (g/run* actor {:request request :context operator} {:thread-id tid}))
+
+(defn- approve! [actor tid]
+  (g/run* actor {:approval {:status :approved :by "op-1"}}
+          {:thread-id tid :resume? true}))
+
+(defn run-demo!
+  "Runs a fresh seeded store through a scenario mixing every disposition
+  this actor can reach, using ONLY real application/officer ids from
+  `formation.store/demo-data`:
+
+  app-1 (JPN, Kotoba Trading GK, officer o-1) walks the full clean
+  lifecycle: an `:application/intake` normalization patch is a phase-3,
+  no-actuation auto-commit (governor clean, `:application/intake` is the
+  ONLY op any phase's `:auto` set ever contains -- `formation.phase`);
+  `:jurisdiction/assess` (JPN has a real spec-basis in `formation.facts`)
+  and `:kyc/screen` on o-1 (clean: no sanctions hit, has an id-doc) each
+  ALWAYS escalate (neither op is ever auto-eligible, at any phase) and are
+  approved by a human registrar; `:filing/submit`, `:registry/amend`
+  (a registered-address change) and `:registry/dissolve` -- three REAL-
+  WORLD actuation events this actor performs (a real government filing
+  submission, a real amendment filing, a real dissolution filing) --
+  ALSO ALWAYS escalate (the governor's own `high-stakes` :actuation gate
+  AND the phase table agree, independently, that actuation is never auto,
+  at any phase) and are each approved, producing one draft incorporation
+  record (with a real ISO 17442 / ISO 7064 MOD-97-10 LEI), one draft
+  change record and one draft dissolution record.
+
+  Then three DISTINCT HARD-hold reasons, none of which ever reach a human
+  (a human approver cannot override a HARD violation):
+    - app-1, given an `:application/intake` patch AFTER it has already been
+      dissolved: HARD-holds on `:post-filing-intake-blocked` -- once an
+      application is `:filed`/`:dissolved`, further changes MUST go through
+      `:registry/amend`/`:registry/dissolve`, never the auto-eligible
+      intake path (the backdoor `formation.governor` check #6 exists to
+      close).
+    - app-2 (jurisdiction ATL, not in `formation.facts/catalog` -- this is
+      app-2's real seeded jurisdiction, not an invented one):
+      `:jurisdiction/assess` HARD-holds on `:no-spec-basis` -- the advisor
+      may not invent a jurisdiction's incorporation requirements.
+    - o-2 (seeded with `:sanctions-hit? true` in `formation.store/demo-
+      data`): `:kyc/screen` HARD-holds on `:sanctions-hit` -- a sanctions/
+      PEP hit blocks progress, un-overridably, even at 0.95 confidence.
+
+  Returns the resulting store -- every field `render` below reads is real
+  governor/store output, not a hand-typed copy."
+  []
+  (let [db (store/seed-db)
+        actor (op/build db)]
+
+    ;; app-1: clean directory-normalization patch -- phase-3 auto-commit,
+    ;; no actuation yet.
+    (exec! actor "t1-intake" {:op :application/intake :subject "app-1"
+                               :patch {:id "app-1" :status :ready}})
+
+    ;; app-1: jurisdiction incorporation-requirements assessment (JPN has a
+    ;; real spec-basis) -- ALWAYS escalates, approved by a human registrar.
+    (exec! actor "t2-assess" {:op :jurisdiction/assess :subject "app-1"})
+    (approve! actor "t2-assess")
+
+    ;; o-1: KYC/sanctions screening, clean -- ALWAYS escalates, approved by
+    ;; a human registrar.
+    (exec! actor "t3-kyc" {:op :kyc/screen :subject "o-1"})
+    (approve! actor "t3-kyc")
+
+    ;; app-1: REAL government filing submission (actuation/filing-submit,
+    ;; a real registry entry + a real fee) -- ALWAYS escalates regardless
+    ;; of phase or confidence, approved by a human registrar. Produces a
+    ;; draft incorporation record with a real ISO 17442 LEI.
+    (exec! actor "t4-filing" {:op :filing/submit :subject "app-1"})
+    (approve! actor "t4-filing")
+
+    ;; app-1: post-incorporation amendment (registered-address change) --
+    ;; ALWAYS escalates (actuation), approved by a human registrar. Appends
+    ;; a change-draft record; the incorporation record is never overwritten.
+    (exec! actor "t5-amend" {:op :registry/amend :subject "app-1"
+                              :changed-fields {:address "東京都港区2-2-2"}
+                              :effective-date "2026-08-01"})
+    (approve! actor "t5-amend")
+
+    ;; app-1: dissolution -- ALWAYS escalates (actuation), approved by a
+    ;; human registrar. Appends a dissolution-draft record.
+    (exec! actor "t6-dissolve" {:op :registry/dissolve :subject "app-1"
+                                 :reason "voluntary wind-up"
+                                 :effective-date "2026-12-01"})
+    (approve! actor "t6-dissolve")
+
+    ;; app-1 AGAIN, post-dissolution: an :application/intake patch on an
+    ;; already-:dissolved application -> HARD hold on
+    ;; :post-filing-intake-blocked, never reaches a human. (A plain second
+    ;; :registry/dissolve attempt ALSO independently HARD-holds on
+    ;; :already-dissolved, verified separately -- but `formation.
+    ;; registrarllm/propose-dissolution`'s own early-exit branch for an
+    ;; already-dissolved target always returns an empty `:cites`, which
+    ;; ALSO trips `formation.governor/spec-basis-violations` at the same
+    ;; time, so that op always yields TWO simultaneous violations rather
+    ;; than one clean, isolated reason -- confirmed by actually running it.
+    ;; :application/intake is a genuinely different op with no such
+    ;; overlap: `spec-basis-violations` only applies to :jurisdiction/
+    ;; assess/:filing/submit/:registry/amend/:registry/dissolve, never to
+    ;; :application/intake, so this is the clean way to demonstrate
+    ;; :post-filing-intake-blocked in isolation -- the backdoor-closure
+    ;; check `formation.governor` itself calls out as check #6.)
+    (exec! actor "t7-intake-after-dissolve" {:op :application/intake :subject "app-1"
+                                              :patch {:id "app-1" :capital 2000000}})
+
+    ;; app-2 (ATL, not in formation.facts/catalog -- app-2's real seeded
+    ;; jurisdiction): jurisdiction assessment -> HARD hold on
+    ;; :no-spec-basis, never reaches a human.
+    (exec! actor "t8-assess-app2" {:op :jurisdiction/assess :subject "app-2"})
+
+    ;; o-2 (seeded with :sanctions-hit? true): KYC screening -> HARD hold on
+    ;; :sanctions-hit, never reaches a human.
+    (exec! actor "t9-kyc-o2" {:op :kyc/screen :subject "o-2"})
+
+    db))
+
+;; ----------------------------- rendering -----------------------------
+
+(defn- esc [v]
+  (-> (str v)
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")))
+
+(defn- last-fact-for [ledger subject-id]
+  (last (filter #(= (:subject %) subject-id) ledger)))
+
+(defn- status-cell [ledger subject-id]
+  (let [f (last-fact-for ledger subject-id)]
+    (cond
+      (nil? f) "<span class=\"muted\">no activity</span>"
+      (= :committed (:t f)) "<span class=\"ok\">committed</span>"
+      (= :approval-granted (:t f)) "<span class=\"ok\">approved &amp; committed</span>"
+      (= :governor-hold (:t f))
+      (let [rule (-> f :violations first :rule)]
+        (str "<span class=\"critical\">HARD hold &middot; " (esc (name (or rule :unknown))) "</span>"))
+      (= :approval-requested (:t f)) "<span class=\"warn\">awaiting approval</span>"
+      :else "<span class=\"muted\">in progress</span>")))
+
+(defn- all-officer-ids []
+  (sort (keys (:officers (store/demo-data)))))
+
+(defn- application-row [ledger {:keys [id entity-name jurisdiction officers capital
+                                        status registry-number lei]}]
+  (format "        <tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+          (esc id) (esc entity-name) (esc jurisdiction) (esc (str/join ", " officers))
+          (esc capital) (esc (name (or status :n-a)))
+          (if registry-number (str "<code>" (esc registry-number) "</code>") "<span class=\"muted\">unfiled</span>")
+          (status-cell ledger id)))
+
+(defn- officer-row [ledger db id]
+  (let [{officer-name :name :keys [sanctions-hit? id-doc]} (store/officer db id)
+        kyc (store/kyc-of db id)]
+    (format "        <tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+            (esc id) (esc officer-name)
+            (if sanctions-hit? "<span class=\"critical\">sanctions/PEP hit on file</span>" "<span class=\"ok\">clear on file</span>")
+            (if id-doc "<span class=\"ok\">on file</span>" "<span class=\"warn\">missing</span>")
+            (if kyc (esc (clojure.core/name (:verdict kyc))) "<span class=\"muted\">not yet screened</span>")
+            (status-cell ledger id))))
+
+(defn- record-row [{:strs [record_id kind entity_name registry_number jurisdiction lei immutable]}]
+  (format "        <tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+          (esc (str/replace kind "-draft" "")) (esc record_id)
+          (esc (or entity_name registry_number "-")) (esc (or jurisdiction "-"))
+          (if lei (str "<code>" (esc lei) "</code>") "<span class=\"muted\">n/a</span>")
+          (if immutable "<span class=\"ok\">immutable draft</span>" (esc kind))))
+
+(defn- ledger-row [{:keys [t op subject disposition basis]}]
+  (format "        <tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>"
+          (esc (name t)) (esc (name (or op :n-a))) (esc subject)
+          (esc (or (some->> basis (map #(if (keyword? %) (name %) %)) (str/join ", "))
+                    (some-> disposition name) ""))))
+
+(def ^:private action-gate-rows
+  ;; Static description of this actor's own op contract
+  ;; (`formation.governor`/`formation.phase`) -- documentation of fixed
+  ;; behavior, not runtime telemetry, so it is legitimately hand-described
+  ;; rather than derived from a live run.
+  ["        <tr><td><code>:application/intake</code></td><td><span class=\"ok\">phase-3 auto-commit when clean, no actuation yet -- the ONLY auto-eligible op in this domain, at any phase</span></td></tr>"
+   "        <tr><td><code>:jurisdiction/assess</code></td><td><span class=\"warn\">ALWAYS human approval &middot; spec-basis independently checked against <code>formation.facts</code>, never fabricated</span></td></tr>"
+   "        <tr><td><code>:kyc/screen</code></td><td><span class=\"warn\">ALWAYS human approval when clean &middot; a sanctions/PEP hit is a HARD, un-overridable hold instead</span></td></tr>"
+   "        <tr><td><code>:filing/submit</code></td><td><span class=\"warn\">ALWAYS human approval &middot; real government filing submission (actuation) &middot; document-completeness + KYC-completeness independently verified, never auto at any phase</span></td></tr>"
+   "        <tr><td><code>:registry/amend</code></td><td><span class=\"warn\">ALWAYS human approval &middot; real amendment filing (actuation) &middot; only <code>amendable-fields</code> allowed -- :status/:jurisdiction/:registry-number/:lei/:id are structurally off-limits</span></td></tr>"
+   "        <tr><td><code>:registry/dissolve</code></td><td><span class=\"warn\">ALWAYS human approval &middot; real dissolution filing (actuation) &middot; double-dissolution guard independently enforced, never auto at any phase</span></td></tr>"])
+
+(defn render
+  "Renders the full operator-console.html document from a store `db`
+  that has already run `run-demo!` (or any other real scenario)."
+  [db]
+  (let [ledger (vec (store/ledger db))
+        applications (store/all-applications db)
+        officer-ids (all-officer-ids)
+        application-rows (str/join "\n" (map (partial application-row ledger) applications))
+        officer-rows (str/join "\n" (map (partial officer-row ledger db) officer-ids))
+        record-rows (str/join "\n" (map record-row (store/registry-history db)))
+        ledger-rows (str/join "\n" (map ledger-row ledger))]
+    (str
+     "<html><head><meta charset=\"utf-8\"><title>cloud-itonami-isic-6910 &middot; legal activities (company formation)</title><style>\n"
+     "table { width: 100%; border-collapse: collapse; font-size: 14px; }\n"
+     ".ok { color: #137a3f; }\n"
+     "body { font-family: system-ui,-apple-system,sans-serif; margin: 0; color: #1a1a1a; background: #fafafa; }\n"
+     "header.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: #fff; border-bottom: 1px solid #e5e5e5; }\n"
+     "th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; }\n"
+     "h2 { margin-top: 0; font-size: 15px; }\n"
+     ".warn { color: #b25c00; background: #fff8e1; padding: 2px 6px; border-radius: 4px; }\n"
+     "main { max-width: 980px; margin: 24px auto; padding: 0 20px; }\n"
+     "header.bar h1 { font-size: 18px; margin: 0; font-weight: 600; }\n"
+     ".muted { color: #888; font-size: 13px; }\n"
+     ".critical { color: #fff; background: #b3261e; padding: 2px 6px; border-radius: 4px; font-weight: 600; }\n"
+     ".card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 16px; margin-bottom: 16px; }\n"
+     ".err { color: #b3261e; background: #fbe9e7; padding: 2px 6px; border-radius: 4px; }\n"
+     "th { font-weight: 600; color: #555; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }\n"
+     "header.bar .badge { margin-left: auto; font-size: 12px; color: #666; }\n"
+     "code { font-size: 12px; background: #f4f4f4; padding: 1px 4px; border-radius: 3px; }\n"
+     "</style></head><body>\n"
+     "<header class=\"bar\">\n"
+     "  <h1>Global Incorporation Actor (ISIC 6910) — Operator Console</h1>\n"
+     "  <span class=\"badge\">read-only sample · governor-gated · filing/amendment/dissolution always human-approved</span>\n"
+     "</header>\n"
+     "<main>\n"
+     "  <section class=\"card\">\n"
+     "    <h2>Applications</h2>\n"
+     "    <p class=\"muted\">Demo snapshot — build-time-generated from <code>formation.store</code> via <code>formation.render-html</code> (<code>clojure -M:dev:render-html</code>), regenerated nightly.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Application</th><th>Entity name</th><th>Jurisdiction</th><th>Officers</th><th>Capital</th><th>Status</th><th>Registry number</th><th>Last op status</th></tr></thead>\n"
+     "      <tbody>\n"
+     application-rows "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+     "  <section class=\"card\">\n"
+     "    <h2>Officers</h2>\n"
+     "    <p class=\"muted\">KYC/sanctions screening status per officer on file.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Officer</th><th>Name</th><th>Sanctions/PEP</th><th>ID document</th><th>KYC verdict</th><th>Last op status</th></tr></thead>\n"
+     "      <tbody>\n"
+     officer-rows "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+     "  <section class=\"card\">\n"
+     "    <h2>Draft registry records</h2>\n"
+     "    <p class=\"muted\">Unsigned drafts only — the government registry's own act of filing/signing is outside this actor's authority (see README <code>Actuation</code>). Append-only: an amendment or dissolution never overwrites the original incorporation record.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Kind</th><th>Record id</th><th>Entity / Registry number</th><th>Jurisdiction</th><th>LEI (ISO 17442)</th><th>Status</th></tr></thead>\n"
+     "      <tbody>\n"
+     record-rows "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+     "  <section class=\"card\">\n"
+     "    <h2>Action gate (RegistrarGovernor)</h2>\n"
+     "    <p class=\"muted\">HARD holds cannot be overridden by a human approver. Jurisdiction spec-basis, sanctions/PEP status, document completeness and dissolution targets are independently recomputed, never trusted from the advisor's proposal; a real filing, amendment or dissolution is always a human registrar's call, at every rollout phase.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Op</th><th>Gate</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" action-gate-rows) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+     "  <section class=\"card\">\n"
+     "    <h2>Audit ledger (this run)</h2>\n"
+     "    <p class=\"muted\">Append-only decision-fact log — every proposal, hold and commit this scenario produced.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Fact</th><th>Op</th><th>Subject</th><th>Basis</th></tr></thead>\n"
+     "      <tbody>\n"
+     ledger-rows "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+     "</main>\n"
+     "</body></html>\n")))
+
+(defn -main [& args]
+  (let [out (or (first args) "docs/samples/operator-console.html")
+        db (run-demo!)
+        html (render db)]
+    (spit out html)
+    (println "wrote" out "(" (count (store/ledger db)) "ledger facts,"
+             (count (store/registry-history db)) "registry records )")))
